@@ -3,6 +3,7 @@
 #include <cmath>
 #include <ctime>
 #include <cstdlib>
+#include <cctype>
 using namespace std;
 //constants
 const int WINDOW_WIDTH = 1024;
@@ -75,6 +76,7 @@ enum Screen {
     SCREEN_DETAIL,
     SCREEN_BOOKINGS,
     SCREEN_MESSAGE
+    SCREEN_SEARCH
 };
 // Global arrays
 Hotel hotels[MAX_HOTELS];
@@ -116,6 +118,28 @@ string generateBookingId() {
     int num = 1000 + rand() % 9000;
     return to_string(num);
 }
+
+bool containsIgnoreCase(string text, string search) 
+{
+    if (search.empty()) return true;
+    if (text.empty()) return false;
+    
+    string textLower = "";
+    for (int i = 0; i < (int)text.length(); i++)
+    {
+        textLower += tolower(text[i]);
+    }
+
+    string searchLower = "";
+    for (int i = 0; i < (int)search.length(); i++) 
+    {
+        searchLower += tolower(search[i]);
+    }
+    
+    int position = textLower.find(searchLower);
+    return position != (int)string::npos;
+}
+
 
 //functions for color
 Color getCategoryColor(string category) {
@@ -284,6 +308,31 @@ bool createBooking(int hotelIndex, int numNights, int numGuests) {
     user.placesVisited++;
     return true;
 }
+
+int SearchHotels(int outResults[], int maxResults,
+                 string name, string city,
+                 string category, float minPrice, float maxPrice) {
+    int count = 0;
+
+    for (int i = 0; i < hotelCount && count < maxResults; i++) {
+        Hotel h = hotels[i];
+        if (!h.isActive) continue;
+
+        bool nameMatch = containsIgnoreCase(h.name, name);
+        bool cityMatch = containsIgnoreCase(h.city, city);
+        bool categoryMatch = containsIgnoreCase(h.category, category);
+        bool priceMatch = (h.currentPrice >= minPrice && h.currentPrice <= maxPrice);
+
+        if (nameMatch && cityMatch && categoryMatch && priceMatch) {
+            outResults[count] = i;
+            count++;
+        }
+    }
+
+    return count;
+}
+
+
 bool cancelBooking(int index) {
     if (index < 0 || index >= bookingCount) return false;
     if (!bookings[index].isActive) return false;
@@ -380,6 +429,12 @@ void drawHomeScreen() {
         currentScreen = SCREEN_EXPLORE;
     }
     if (drawButton(260, 180, 200, 50, "My Bookings", Color{34, 197, 94, 255})) currentScreen = SCREEN_BOOKINGS;
+
+    if (drawButton(480, 180, 200, 50, "Search", Color{168, 85, 247, 255})) 
+    {
+    scrollPosition = 0;
+    currentScreen = SCREEN_SEARCH;
+    }
     // Recommendation List (Shows first 3 active hotels)
     drawText("Recommended For You", 40, 260, 18, BLACK);
     int y = 295;
@@ -397,7 +452,7 @@ void drawHomeScreen() {
         
         //Show a red badge if there's a discount
         if (h.hasDeal) {
-            drawRoundedBox(840, y + 10, 80, 25, Red;
+            drawRoundedBox(840, y + 10, 80, 25, Red);
             drawText(to_string((int)h.dealPercent) + "% OFF!", 855, y + 15, 13, WHITE);
         }
         
@@ -413,12 +468,72 @@ void drawExploreScreen(){
     if (drawButton(15, 12, 40, 40, "<", GRAY)) currentScreen = SCREEN_HOME; //Back button
     drawText("Explore Pakistan", (1024 - measureText("Explore Pakistan", 24)) / 2, 18, 24, BLACK);
     //Loop through hotels with a simple scroll offset (scrollPosition)
-    int y = 85;
-    int maxVisible = 7;
-    int displayedCount = 0;
-    for (int i = scrollPosition; i < hotelCount && displayedCount < maxVisible; i++) {
-        const Hotel& h = hotels[i];
-        if (!h.isActive) continue;
+    // City filter
+int filterX = 40;
+bool allSelected = searchCity.empty();
+if (drawSmallButton(filterX, 70, 60, 30, "All", allSelected ? PakGreen : GRAY)) {
+    searchCity = "";
+}
+filterX += 70;
+
+for (int i = 0; i < MAX_CITIES; i++) {
+    bool isSelected = (searchCity == CITIES[i]);
+    Color btnColor = isSelected ? getCityColor(CITIES[i]) : GRAY;
+    if (drawSmallButton(filterX, 70, 110, 30, CITIES[i], btnColor)) {
+        if (isSelected) searchCity = "";
+        else searchCity = CITIES[i];
+    }
+    filterX += 118;
+}
+
+// Get filtered hotels
+int results[MAX_HOTELS];
+int resultCount = SearchHotels(results, MAX_HOTELS, "", searchCity, "", 0, 999999);
+
+int y = 115;
+int maxVisible = 6;
+
+for (int idx = scrollPosition; idx < resultCount && idx < scrollPosition + maxVisible; idx++) {
+    int i = results[idx];
+    const Hotel& h = hotels[i];
+    
+    drawRoundedBox(40, y, 940, 85, WHITE);
+    drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
+    
+    drawText(h.name, 65, y + 12, 18, BLACK);
+    string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
+    drawText(info, 65, y + 42, 14, GRAY);
+    
+    if (h.hasDeal) {
+        string deal = to_string((int)h.dealPercent) + "% OFF!";
+        drawRoundedBox(800, y + 10, 80, 25, Red);
+        drawText(deal, 815, y + 15, 13, WHITE);
+    }
+    
+    string rating = to_string(h.rating).substr(0, 3);
+    drawText(rating, 900, y + 40, 18, Color{234, 179, 8, 255});
+    
+    if (CheckCollisionPointRec(GetMousePosition(), {40, (float)y, 940, 85}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)){
+        selectedHotelIndex = i;
+        nights = 1;
+        guests = 2;
+        bookingDay = appDay;
+        bookingMonth = appMonth;
+        bookingYear = appYear;
+        currentScreen = SCREEN_DETAIL;
+    }
+    
+    y += 95;
+}
+
+// Scroll controls
+if (scrollPosition > 0 && drawButton(450, 720, 70, 35, "Up", GRAY)) scrollPosition--;
+if (scrollPosition + maxVisible < resultCount && drawButton(530, 720, 70, 35, "Down", GRAY)) scrollPosition++;
+
+int showing = resultCount - scrollPosition;
+if (showing > maxVisible) showing = maxVisible;
+string countText = "Showing " + to_string(showing) + " of " + to_string(resultCount);
+drawText(countText, 40, 725, 14, GRAY);
         //Card UI for each hotel
         drawRoundedBox(40, y, 940, 85, WHITE);
         drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
@@ -428,7 +543,7 @@ void drawExploreScreen(){
         drawText(info, 65, y + 42, 14, GRAY);
         
         if (h.hasDeal) {
-            drawRoundedBox(800, y + 10, 80, 25, Red;
+            drawRoundedBox(800, y + 10, 80, 25, Red);
             drawText(to_string((int)h.dealPercent) + "% OFF!", 815, y + 15, 13, WHITE);
         }
         
@@ -546,7 +661,7 @@ void drawBookingsScreen() {
         currentScreen = SCREEN_HOME;
     drawText("My Bookings", 440, 18, 24, BLACK);
     //Header showing the current financial summary
-    drawText("Your Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent), 650, 28, 14, Color{0, 102, 51, 255})
+    drawText("Your Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent), 650, 28, 14, Color{0, 102, 51, 255});
     //Count active bookings
     int activeCount = 0;
     for (int i = 0; i < bookingCount; i++){
@@ -609,6 +724,149 @@ void drawMessageScreen(){
     if (!currentLine.empty()) drawText(currentLine, 300, yPosition, 18, BLACK);
     if (drawButton(412, 420, 200, 50, "OK", PakGreen)) currentScreen = SCREEN_HOME;
 }
+
+void drawSearchScreen() {
+    ClearBackground(LIGHT);
+    DrawRectangle(0, 0, 1024, 60, WHITE);
+    
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        searchName = "";
+        searchCity = "";
+        searchCategory = "";
+        searchMinPrice = 0;
+        searchMaxPrice = 50000;
+        currentScreen = SCREEN_HOME;
+    }
+    
+    drawText("Search Destinations", 420, 18, 24, BLACK);
+    
+    drawRoundedBox(40, 75, 420, 280, WHITE);
+    drawText("Filters", 70, 95, 18, BLACK);
+    
+    drawText("Name:", 70, 137, 14, GRAY);
+    DrawRectangle(140, 130, 200, 30, Color{245, 245, 245, 255});
+    DrawRectangleLines(140, 130, 200, 30, inputFieldActive == 0 ? PakGreen : GRAY);
+    drawText(searchName, 150, 137, 14, BLACK);
+    Rectangle nameRect = {140, 130, 200, 30};
+    if (CheckCollisionPointRec(GetMousePosition(), nameRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        inputFieldActive = 0;
+        string searchName = "";
+string searchCity = "";
+string searchCategory = "";
+float searchMinPrice = 0;
+float searchMaxPrice = 50000;
+
+    }
+    
+    drawText("City:", 70, 177, 14, GRAY);
+    DrawRectangle(140, 170, 200, 30, Color{245, 245, 245, 255});
+    DrawRectangleLines(140, 170, 200, 30, inputFieldActive == 1 ? PakGreen : GRAY);
+    drawText(searchCity, 150, 177, 14, BLACK);
+    Rectangle cityRect = {140, 170, 200, 30};
+    if (CheckCollisionPointRec(GetMousePosition(), cityRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        inputFieldActive = 1;
+    }
+    
+    drawText("Category:", 70, 217, 14, GRAY);
+    DrawRectangle(140, 210, 200, 30, Color{245, 245, 245, 255});
+    DrawRectangleLines(140, 210, 200, 30, inputFieldActive == 2 ? PakGreen : GRAY);
+    drawText(searchCategory, 150, 217, 14, BLACK);
+    Rectangle catRect = {140, 210, 200, 30};
+    if (CheckCollisionPointRec(GetMousePosition(), catRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        inputFieldActive = 2;
+    }
+    
+    drawText("Price Range:", 70, 260, 14, GRAY);
+    string priceRange = "Rs." + to_string((int)searchMinPrice) + " - Rs." + to_string((int)searchMaxPrice);
+    drawText(priceRange, 70, 285, 14, GRAY);
+    
+    if (drawSmallButton(70, 315, 100, 28, "Budget", GRAY)) {
+        searchMinPrice = 0;
+        searchMaxPrice = 5000;
+    }
+    if (drawSmallButton(180, 315, 100, 28, "Mid", GRAY)) {
+        searchMinPrice = 5000;
+        searchMaxPrice = 15000;
+    }
+    if (drawSmallButton(290, 315, 100, 28, "Luxury", GRAY)) {
+        searchMinPrice = 15000;
+        searchMaxPrice = 50000;
+    }
+    
+    if (inputFieldActive == 0) handleTextInput(searchName, 60);
+    if (inputFieldActive == 1) handleTextInput(searchCity, 30);
+    if (inputFieldActive == 2) handleTextInput(searchCategory, 30);
+    
+    drawRoundedBox(480, 75, 500, 250, WHITE);
+    drawText("Quick Select City:", 510, 95, 14, BLACK);
+    int qx = 510, qy = 125;
+    
+    if (drawSmallButton(qx, qy, 50, 28, "All", searchCity.empty() ? PakGreen : GRAY)) {
+        searchCity = "";
+    }
+    qx += 60;
+    
+    for (int i = 0; i < MAX_CITIES; i++) {
+        if (drawSmallButton(qx, qy, 100, 28, CITIES[i], getCityColor(CITIES[i]))) {
+            searchCity = CITIES[i];
+        }
+        qx += 110;
+        if (qx > 900) { qx = 510; qy += 35; }
+    }
+    
+    drawText("Quick Select Category:", 510, 220, 14, BLACK);
+    qx = 510; qy = 250;
+    for (int i = 0; i < MAX_CATEGORIES; i++) {
+        if (drawSmallButton(qx, qy, 85, 28, CATEGORIES[i], getCategoryColor(CATEGORIES[i]))) {
+            searchCategory = CATEGORIES[i];
+        }
+        qx += 95;
+    }
+    
+    int results[MAX_HOTELS];
+    int resultCount = SearchHotels(results, MAX_HOTELS, searchName, searchCity, searchCategory, searchMinPrice, searchMaxPrice);
+
+    string resultText = "Found: " + to_string(resultCount) + " destinations";
+    drawText(resultText, 40, 375, 16, BLACK);
+    
+    int maxVisible = 4;
+    if (scrollPosition > 0 && drawButton(200, 370, 70, 30, "Up", GRAY)) {
+        scrollPosition--;
+    }
+    if (scrollPosition + maxVisible < resultCount && drawButton(280, 370, 70, 30, "Down", GRAY)) {
+        scrollPosition++;
+    }
+    
+    if (scrollPosition >= resultCount) scrollPosition = 0;
+    
+    int y = 410;
+    for (int idx = scrollPosition; idx < resultCount && idx < scrollPosition + maxVisible; idx++) {
+        int i = results[idx];
+        const Hotel& h = hotels[i];
+        
+        drawRoundedBox(40, y, 940, 75, WHITE);
+        drawRoundedBox(40, y, 8, 75, getCityColor(h.city));
+        
+        drawText(h.name, 65, y + 10, 18, BLACK);
+        string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
+        drawText(info, 65, y + 38, 14, GRAY);
+        
+        Rectangle cardRect = {40, (float)y, 940, 75};
+        if (CheckCollisionPointRec(GetMousePosition(), cardRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            selectedHotelIndex = i;
+            nights = 1;
+            guests = 2;
+            bookingDay = appDay;
+            bookingMonth = appMonth;
+            bookingYear = appYear;
+            currentScreen = SCREEN_DETAIL;
+        }
+        
+        y += 85;
+    }
+}
+
+
 int main(){
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel App"); //Initialize window
     SetTargetFPS(60);
@@ -638,7 +896,8 @@ int main(){
             case SCREEN_DETAIL:   drawDetailScreen(); break;
             case SCREEN_BOOKINGS: drawBookingsScreen(); break;
             case SCREEN_MESSAGE: drawMessageScreen(); break;
-            default:              drawHomeScreen(); break;
+            case SCREEN_SEARCH:drawSearchScreen();break;
+            default:drawHomeScreen(); break;
         }
     EndDrawing();
     }
