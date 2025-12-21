@@ -89,12 +89,32 @@ int selectedHotelIndex = -1;
 int scrollPosition = 0;
 float splashTimer = 0;
 string inputText = "";
+string messageText = "";
+//Booking form variables
+int nights = 1;
+int guests = 2;
+int bookingDay = 20;
+int bookingMonth = 12;
+int bookingYear = 2025;
+//App's current date (simulated)
+int appDay = 20;
+int appMonth = 12;
+int appYear = 2025;
 
 //helper functions
 float clamp(float value, float minVal, float maxVal) {
     if (value < minVal) return minVal;
     if (value > maxVal) return maxVal;
     return value;
+}
+string formatDate(int day, int month, int year) {
+    string d = (day < 10) ? "0" + to_string(day) : to_string(day);
+    string m = (month < 10) ? "0" + to_string(month) : to_string(month);
+    return d + "-" + m + "-" + to_string(year);
+}
+string generateBookingId() {
+    int num = 1000 + rand() % 9000;
+    return to_string(num);
 }
 
 //functions for color
@@ -225,6 +245,54 @@ void initializeHotels() {
     addHotel("Red Onion Hotel", "Muzaffarabad", "Budget", 3000, 3.7f, false);
     addHotel("Neelum View", "Muzaffarabad", "Resort", 6000, 4.0f, false);
     
+}
+//functions for booking
+bool createBooking(int hotelIndex, int numNights, int numGuests) {
+    if (hotelIndex < 0 || hotelIndex >= hotelCount) return false;
+    if (bookingCount >= MAX_BOOKINGS) return false;
+    
+    Hotel& hotel = hotels[hotelIndex];
+    int roomsNeeded = (numGuests + MAX_GUESTS_PER_ROOM - 1) / MAX_GUESTS_PER_ROOM;
+    float totalCost = hotel.currentPrice * numNights * roomsNeeded;
+    //Check budget
+    if (user.maxBudget > 0 && (user.totalSpent + totalCost) > user.maxBudget) 
+        return false;
+    //Calculates checkout date
+    int checkoutDay = bookingDay + numNights;
+    int checkoutMonth = bookingMonth;
+    int checkoutYear = bookingYear;
+    while (checkoutDay > 30) {
+        checkoutDay -= 30;
+        checkoutMonth++;
+        if (checkoutMonth > 12) { checkoutMonth = 1; checkoutYear++; }
+    }
+    Booking booking;
+    booking.hotelName = hotel.name;
+    booking.city = hotel.city;
+    booking.bookingId = generateBookingId();
+    booking.checkInDate = formatDate(bookingDay, bookingMonth, bookingYear);
+    booking.checkOutDate = formatDate(checkoutDay, checkoutMonth, checkoutYear);
+    booking.nights = numNights;
+    booking.guests = numGuests;
+    booking.rooms = roomsNeeded;
+    booking.totalCost = totalCost;
+    booking.isActive = true;
+
+    bookings[bookingCount++] = booking;
+    user.totalBookings++;
+    user.totalSpent += totalCost;
+    user.placesVisited++;
+    return true;
+}
+bool cancelBooking(int index) {
+    if (index < 0 || index >= bookingCount) return false;
+    if (!bookings[index].isActive) return false;
+    
+    user.totalSpent -= bookings[index].totalCost;
+    user.totalBookings--;
+    user.placesVisited--;
+    bookings[index].isActive = false;
+    return true;
 }
 //Functions for screen
 void drawSplashScreen() {
@@ -409,7 +477,66 @@ void drawDetailScreen(){
     if (hotel.hasPool) { drawText("Pool", amenX, 315, 14, GRAY); amenX += 70; }
     drawText("AC", amenX, 315, 14, GRAY);
     drawText("Price: Rs." + to_string((int)hotel.currentPrice) + "/night", 60, 380, 22, PakGreen);
-    drawText("Booking functionality coming in next version!", 60, 450, 16, GRAY);
+    //Date selection
+    drawText("Check-in Date:", 550, 285, 16, BLACK);
+    string dateDisplay = formatDate(bookingDay, bookingMonth, bookingYear);
+    drawText(dateDisplay, 700, 285, 16, Color{0, 102, 51, 255});
+    
+    drawText("Day:", 550, 320, 14, GRAY);
+    if (drawSmallButton(600, 315, 30, 25, "-", GRAY) && bookingDay > 1) bookingDay--;
+    drawText(to_string(bookingDay), 645, 320, 14, BLACK);
+    if (drawSmallButton(680, 315, 30, 25, "+", GRAY) && bookingDay < 28) bookingDay++;
+    
+    drawText("Month:", 550, 355, 14, GRAY);
+    if (drawSmallButton(620, 350, 30, 25, "-", GRAY) && bookingMonth > 1) bookingMonth--;
+    drawText(to_string(bookingMonth), 665, 355, 14, BLACK);
+    if (drawSmallButton(700, 350, 30, 25, "+", GRAY) && bookingMonth < 12) bookingMonth++;
+    //Nights and Guests
+    drawText("Nights:", 60, 360, 16, BLACK);
+    if (drawSmallButton(140, 355, 35, 30, "-", GRAY) && nights > 1) nights--;
+    drawText(to_string(nights), 190, 360, 16, BLACK);
+    if (drawSmallButton(230, 355, 35, 30, "+", GRAY) && nights < 30) nights++;
+    
+    drawText("Guests:", 60, 405, 16, BLACK);
+    if (drawSmallButton(140, 400, 35, 30, "-", GRAY) && guests > 1) guests--;
+    drawText(to_string(guests), 190, 405, 16, BLACK);
+    if (drawSmallButton(230, 400, 35, 30, "+", GRAY) && guests < 20) guests++;
+    //Room calculation
+    int roomsNeeded = (guests + MAX_GUESTS_PER_ROOM - 1) / MAX_GUESTS_PER_ROOM;
+    string roomInfo = "Rooms needed: " + to_string(roomsNeeded) + " (max 4 guests/room)";
+    drawText(roomInfo, 60, 450, 14, GRAY);
+    //Price calculation
+    float total = hotel.currentPrice * nights * roomsNeeded;
+    drawRoundedBox(30, 540, 964, 90, PakGreen);
+    
+    string priceInfo = "Rs." + to_string((int)hotel.currentPrice) + "/night x " + 
+                       to_string(nights) + " nights x " + to_string(roomsNeeded) + " rooms";
+    drawText(priceInfo, 60, 555, 14, Color{200, 255, 200, 255});
+    string totalText = "Total: Rs." + to_string((int)total);
+    drawText(totalText, 60, 585, 28, WHITE);
+    //Budget warning
+    bool exceedsBudget = user.maxBudget > 0 && (user.totalSpent + total) > user.maxBudget;
+    if (exceedsBudget){
+        drawRoundedBox(550, 500, 280, 30, DANGER_RED);
+        drawText("Exceeds Your Budget!", 600, 507, 14, WHITE);
+    }
+    //Book button
+    if (drawButton(750, 570, 220, 50, "Book Now", Color{34, 197, 94, 255})) {
+        if (exceedsBudget){
+            messageText = "Booking Failed!\nExceeds your budget: Rs." + to_string((int)user.maxBudget);
+            currentScreen = SCREEN_MESSAGE;}
+        else if (createBooking(selectedHotelIndex, nights, guests)){
+            const Booking& b = bookings[bookingCount - 1];
+            messageText = "Booking Confirmed!\nID: " + b.bookingId + 
+                          "\n" + to_string(nights) + " nights, " + to_string(guests) + 
+                          " guests (" + to_string(roomsNeeded) + " rooms)" +
+                          "\nTotal: Rs." + to_string((int)b.totalCost);
+            currentScreen = SCREEN_MESSAGE;
+        } else {
+            messageText = "Booking Failed!\nBudget limits exceeded.";
+            currentScreen = SCREEN_MESSAGE;
+        }
+    }
 }
 void drawBookingsScreen() {
     ClearBackground(LIGHT);
@@ -419,13 +546,71 @@ void drawBookingsScreen() {
         currentScreen = SCREEN_HOME;
     drawText("My Bookings", 440, 18, 24, BLACK);
     //Header showing the current financial summary
-    drawText("Your Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent), 650, 28, 14, Color{0, 102, 51, 255});
+    drawText("Your Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent), 650, 28, 14, Color{0, 102, 51, 255})
+    //Count active bookings
+    int activeCount = 0;
+    for (int i = 0; i < bookingCount; i++){
+        if (bookings[i].isActive) activeCount++;
+    }
+    if (activeCount == 0){
+        int noBookingsWidth = measureText("No bookings yet!", 26);
+        drawText("No bookings yet!", (WINDOW_WIDTH - noBookingsWidth) / 2, 350, 26, GRAY);
+        int exploreWidth = measureText("Start exploring Pakistan!", 20);
+        drawText("Start exploring Pakistan!", (WINDOW_WIDTH - exploreWidth) / 2, 400, 20, GRAY);
+        return;
+    }
+    int y = 85;
+    int cardHeight = 130;
     
-    //Placeholder for when the user hasn't booked anything yet
-    drawText("No bookings yet!", 400, 350, 26, GRAY);
+    for (int i = 0; i < bookingCount; i++){
+        const Booking& b = bookings[i];
+        if (!b.isActive) continue;
+        drawRoundedBox(30, y, 960, cardHeight, WHITE);
+        drawRoundedBox(30, y, 10, cardHeight, getCityColor(b.city));
+        drawText(b.hotelName, 60, y + 15, 22, BLACK);
+        //booking id
+        string info = "Booking ID: " + b.bookingId + " | City: " + b.city;
+        drawText(info, 60, y + 50, 16, GRAY);
+        //booking details
+        string details = to_string(b.nights) + " nights | " + 
+                         to_string(b.guests) + " guests | " + 
+                         to_string(b.rooms) + " rooms";
+        drawText(details, 60, y + 75, 16, GRAY);
+        
+        string dates = b.checkInDate + " to " + b.checkOutDate;
+        drawText(dates, 60, y + 100, 14, Color{0, 102, 51, 255});
+        //total cost
+        string total = "Rs." + to_string((int)b.totalCost);
+        drawText(total, 800, y + 20, 24, Color{34, 197, 94, 255});
+        
+        //Cancel button
+        if (drawButton(810, y + 70, 80, 32, "Cancel", DANGER_RED)) {
+            if (cancelBooking(i)) {
+                messageText = "Booking cancelled successfully!";
+                currentScreen = SCREEN_MESSAGE;
+            }
+        }
+        
+        y += cardHeight + 10;
+    }
+}
+void drawMessageScreen(){
+    ClearBackground(LIGHT);
+    drawRoundedBox(262, 250, 500, 250, WHITE);
+    int yPosition = 290;
+    string currentLine = "";
+    for (int i = 0; i < (int)messageText.length(); i++) {
+        if (messageText[i] == '\n') {
+            drawText(currentLine, 300, yPosition, 18, BLACK);
+            yPosition += 30;
+            currentLine = "";
+        } else currentLine += messageText[i];
+    }
+    if (!currentLine.empty()) drawText(currentLine, 300, yPosition, 18, BLACK);
+    if (drawButton(412, 420, 200, 50, "OK", PakGreen)) currentScreen = SCREEN_HOME;
 }
 int main(){
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel Guide"); //Initialize window
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel App"); //Initialize window
     SetTargetFPS(60);
     appFont = LoadFontEx("C:/Windows/Fonts/arial.ttf", 48, 0, 250);//for arial font
     if (appFont.texture.id == 0) 
@@ -452,6 +637,7 @@ int main(){
             case SCREEN_EXPLORE:  drawExploreScreen(); break;
             case SCREEN_DETAIL:   drawDetailScreen(); break;
             case SCREEN_BOOKINGS: drawBookingsScreen(); break;
+            case SCREEN_MESSAGE: drawMessageScreen(); break;
             default:              drawHomeScreen(); break;
         }
     EndDrawing();
