@@ -1073,6 +1073,15 @@ void drawBookingsScreen() {
         //total cost
         string total = "Rs." + to_string((int)b.totalCost);
         drawText(total, 800, y + 20, 24, Color{34, 197, 94, 255});
+
+		// Edit button
+        if (drawButton(810, y + 55, 80, 32, "Edit", Color{59, 130, 246, 255})) {
+            selectedBookingIndex = i;
+            editNights = b.nights;
+            editGuests = b.guests;
+            parseDate(b.checkInDate, editDay, editMonth, editYear);
+            currentScreen = SCREEN_EDIT_BOOKING;
+        }
         
         //Cancel button
         if (drawButton(810, y + 70, 80, 32, "Cancel", DANGER_RED)) {
@@ -1379,6 +1388,7 @@ int main(){
             case SCREEN_BOOKINGS: drawBookingsScreen(); break;
             case SCREEN_MESSAGE: drawMessageScreen(); break;
             case SCREEN_SEARCH:drawSearchScreen();break;
+			case SCREEN_EDIT_BOOKING:drawEditBookingScreen();break;
             default:drawHomeScreen(); break;
         }
     EndDrawing();
