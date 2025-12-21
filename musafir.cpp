@@ -436,7 +436,9 @@ void initializeHotels() {
     addHotel("Kashmir Continental", "Muzaffarabad", "Business", 5000, 3.9f, false);
     addHotel("Red Onion Hotel", "Muzaffarabad", "Budget", 3000, 3.7f, false);
     addHotel("Neelum View", "Muzaffarabad", "Resort", 6000, 4.0f, false);
-    
+
+    // Update prices based on weather after initialization
+    updateHotelPrices();
 }
 //functions for booking
 bool createBooking(int hotelIndex, int numNights, int numGuests) {
@@ -474,6 +476,7 @@ bool createBooking(int hotelIndex, int numNights, int numGuests) {
     user.totalBookings++;
     user.totalSpent += totalCost;
     user.placesVisited++;
+    saveGame();
     return true;
 }
 
@@ -511,34 +514,225 @@ bool cancelBooking(int index) {
     bookings[index].isActive = false;
     return true;
 }
+
+void drawWeatherAlerts(int x, int y) {
+    drawText("Weather Alerts:", x, y, 16, BLACK);
+    
+    int alertY = y + 30;
+    int alertCount = 0;
+    
+    for (int i = 0; i < weatherCount && alertCount < 4; i++) {
+        Weather& w = weatherData[i];
+        
+        if (w.type != WEATHER_NORMAL) {
+            Color alertColor = getWeatherColor(w.type);
+            string icon = getWeatherIcon(w.type);
+            string weatherName = getWeatherName(w.type);
+            
+            drawRoundedBox(x, alertY, 280, 35, Fade(alertColor, 0.2f));
+            drawRoundedBox(x, alertY, 5, 35, alertColor);
+            
+            drawText(icon, x + 15, alertY + 8, 18, alertColor);
+            string alertText = w.city + ": " + weatherName;
+            drawText(alertText, x + 40, alertY + 10, 14, DARKGRAY);
+            
+            string impact;
+            if (w.type == WEATHER_RAIN) {
+                impact = "-15%";
+                drawText(impact, x + 230, alertY + 10, 14, SUCCESS_GREEN);
+            } else if (w.type == WEATHER_FESTIVAL) {
+                impact = "+25%";
+                drawText(impact, x + 230, alertY + 10, 14, DANGER_RED);
+            }
+		alertY += 42;
+            alertCount++;
+        }
+    }
+    
+    if (alertCount == 0) {
+        drawText("All cities have normal weather", x + 10, alertY, 14, GRAY);
+    }
+}
+
+void drawWeatherIndicator(int x, int y, string city) {
+    Weather* w = getWeatherForCity(city);
+    if (w == nullptr) return;
+    
+    Color weatherColor = getWeatherColor(w->type);
+    string icon = getWeatherIcon(w->type);
+    string weatherName = getWeatherName(w->type);
+    
+    drawRoundedBox(x, y, 100, 28, Fade(weatherColor, 0.3f));
+    drawText(icon, x + 10, y + 5, 16, weatherColor);
+    drawText(weatherName, x + 30, y + 7, 12, DARKGRAY);
+}
+
+void saveGame() {
+    ofstream file("musafir_save.txt");
+    if (!file.is_open()) return;
+    
+    file << user.name << "\n";
+    file << user.totalBookings << "\n";
+    file << user.totalSpent << "\n";
+    file << user.placesVisited << "\n";
+    file << user.maxBudget << "\n";
+    file << (user.budgetMode ? 1 : 0) << "\n";
+    file << user.level << "\n";
+    
+    file << visitedHotelCount << "\n";
+    for (int i = 0; i < visitedHotelCount; i++) {
+        file << visitedHotelNames[i] << "\n";
+        file << visitedHotelCities[i] << "\n";
+    }
+    
+    int activeBookings = 0;
+    for (int i = 0; i < bookingCount; i++) {
+        if (bookings[i].isActive) activeBookings++;
+    }
+    file << activeBookings << "\n";
+
+for (int i = 0; i < bookingCount; i++) {
+        const Booking& b = bookings[i];
+        if (!b.isActive) continue;
+        file << b.hotelName << "\n";
+        file << b.city << "\n";
+        file << b.bookingId << "\n";
+        file << b.checkInDate << "\n";
+        file << b.checkOutDate << "\n";
+        file << b.nights << "\n";
+        file << b.guests << "\n";
+        file << b.rooms << "\n";
+        file << b.totalCost << "\n";
+    }
+    
+    file.close();
+}
+
+bool loadGame() {
+    ifstream file("musafir_save.txt");
+    if (!file.is_open()) return false;
+    
+    getline(file, user.name);
+    file >> user.totalBookings;
+    file >> user.totalSpent;
+    file >> user.placesVisited;
+    file >> user.maxBudget;
+    int budgetMode;
+    file >> budgetMode;
+    user.budgetMode = (budgetMode == 1);
+    file >> user.level;
+    
+    file >> visitedHotelCount;
+    file.ignore();
+    if (visitedHotelCount < 0) visitedHotelCount = 0;
+    if (visitedHotelCount > MAX_VISITED_HOTELS) visitedHotelCount = MAX_VISITED_HOTELS;
+    for (int i = 0; i < visitedHotelCount; i++) {
+        getline(file, visitedHotelNames[i]);
+        getline(file, visitedHotelCities[i]);
+    }
+      int loadedCount;
+    file >> loadedCount;
+    file.ignore();
+    
+    for (int i = 0; i < MAX_BOOKINGS; i++) {
+        bookings[i].isActive = false;
+    }
+
+    if (loadedCount < 0) loadedCount = 0;
+    if (loadedCount > MAX_BOOKINGS) loadedCount = MAX_BOOKINGS;
+
+    bookingCount = 0;
+    for (int i = 0; i < loadedCount; i++) {
+        Booking b;
+        getline(file, b.hotelName);
+        getline(file, b.city);
+        getline(file, b.bookingId);
+        getline(file, b.checkInDate);
+        getline(file, b.checkOutDate);
+        file >> b.nights;
+        file >> b.guests;
+        file >> b.rooms;
+        file >> b.totalCost;
+        file.ignore();
+        b.isActive = true;
+		
+	  if (bookingCount < MAX_BOOKINGS) {
+            bookings[bookingCount] = b;
+            bookingCount++;
+        }
+    }
+    
+    file.close();
+    return !user.name.empty();
+}
+
+void initializeApp() {
+    user.name = "";
+    user.totalBookings = 0;
+    user.totalSpent = 0;
+    user.placesVisited = 0;
+    user.travelerScore = 0;
+    user.level = 0;
+    user.maxBudget = 50000;
+    user.budgetMode = true;
+    user.preferredCityCount = 0;
+    for (int i = 0; i < MAX_PREFERRED_CITIES; i++) user.preferredCities[i] = "";
+    
+    visitedHotelCount = 0;
+    for (int i = 0; i < MAX_VISITED_HOTELS; i++) {
+        visitedHotelNames[i] = "";
+        visitedHotelCities[i] = "";
+    }
+    
+    initializeWeather();
+    initializeHotels();
+
+    bookingCount = 0;
+    for (int i = 0; i < MAX_BOOKINGS; i++) bookings[i].isActive = false;
+}
+
+void drawScreenHeader(string title, Screen backScreen) {
+    ClearBackground(BG_LIGHT);
+    DrawRectangle(0, 0, 1024, 60, WHITE);
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        currentScreen = backScreen;
+    }
+    int titleWidth = measureText(title, 24);
+    drawText(title, (1024 - titleWidth) / 2, 18, 24, BLACK);
+}
+
+
 //Functions for screen
 void drawSplashScreen() {
     splashTimer += GetFrameTime();
+    
     ClearBackground(PAKISTAN_GREEN);
-    //bouncing effect for the icon
+    
     float bounce = sinf(splashTimer * 3) * 10;
     DrawCircle(WINDOW_WIDTH / 2, 220 + (int)bounce, 60, WHITE);
-    //Musafir text and smily face
     int faceWidth = measureText("(^.^)", 60);
     drawText("(^.^)", (WINDOW_WIDTH - faceWidth) / 2, 190 + (int)bounce, 60, Color{0, 102, 51, 255});
     
     int titleWidth = measureText("MUSAFIR", 64);
     drawText("MUSAFIR", (WINDOW_WIDTH - titleWidth) / 2, 330, 64, WHITE);
-    
     int subTitleWidth = measureText("Pakistan Travel Guide", 24);
     drawText("Pakistan Travel Guide", (WINDOW_WIDTH - subTitleWidth) / 2, 410, 24, Color{200, 255, 200, 255});
     
-    //loading bar
     float progress = splashTimer / 2.0f;
     if (progress > 1.0f) progress = 1.0f;
     DrawRectangle((WINDOW_WIDTH - 200) / 2, 500, (int)(200 * progress), 10, WHITE);
     
-    //after 3 sec load data and move to login
-    if (splashTimer >= 2.5f){
-        initializeHotels();
-        currentScreen = SCREEN_LOGIN;
+    if (splashTimer >= 2.5f) {
+        if (loadGame()) {
+            initializeHotels();
+            currentScreen = SCREEN_HOME;
+        } else {
+            initializeApp();
+            currentScreen = SCREEN_LOGIN;
+        }
     }
 }
+
 
 void drawLoginScreen(){
     ClearBackground(Color{240, 245, 240, 255});
@@ -568,9 +762,23 @@ void drawLoginScreen(){
     
     // Travel Style Toggle
     drawText("Travel Mode:", 250, 460, 18, DARKGRAY);
-    if (drawButton(250, 495, 140, 45, "Budget", user.budgetMode ? Color{34, 197, 94, 255} : GRAY)) user.budgetMode = true;
-    if (drawButton(410, 495, 140, 45, "Luxury", !user.budgetMode ? Color{168, 85, 247, 255} : GRAY)) user.budgetMode = false;
-    
+    if (drawButton(250, 495, 140, 45, "Budget", budgetBtnColor)) {
+        user.budgetMode = true;
+        updateHotelPrices();
+    }
+    if (drawButton(410, 495, 140, 45, "Luxury", luxuryBtnColor)) {
+        user.budgetMode = false;
+        updateHotelPrices();
+    }
+
+    if (drawButton(380, 580, 260, 55, "Start Journey", PakGreen)) {
+        if (!inputText.empty()) {
+            user.name = inputText;
+            saveGame();
+            currentScreen = SCREEN_HOME;
+        }
+    }
+
     // Submit button - requires a name to proceed
     if (drawButton(380, 570, 260, 55, "Start Journey", PAKISTAN_GREEN)) {
         if (!inputText.empty()) {
@@ -877,6 +1085,112 @@ void drawBookingsScreen() {
         y += cardHeight + 10;
     }
 }
+
+void drawEditBookingScreen() {
+    if (selectedBookingIndex < 0 || selectedBookingIndex >= bookingCount) {
+        currentScreen = SCREEN_BOOKINGS;
+        return;
+    }
+    
+    Booking& booking = bookings[selectedBookingIndex];
+    Hotel* hotel = nullptr;
+    
+    for (int i = 0; i < hotelCount; i++) {
+        if (hotels[i].name == booking.hotelName && hotels[i].city == booking.city) {
+            hotel = &hotels[i];
+            break;
+        }
+    }
+    
+    if (hotel == nullptr) {
+        currentScreen = SCREEN_BOOKINGS;
+        return;
+    }
+    drawScreenHeader("Edit Booking", SCREEN_BOOKINGS);
+    
+    drawRoundedBox(30, 75, 964, 650, WHITE);
+    
+    drawText("Hotel: " + booking.hotelName, 60, 110, 18, BLACK);
+    drawText("City: " + booking.city, 60, 140, 14, GRAY);
+    
+    drawText("Check-in Date:", 60, 180, 16, BLACK);
+    string dateDisplay = formatDate(editDay, editMonth, editYear);
+    drawText(dateDisplay, 400, 180, 16, PAKISTAN_GREEN);
+    
+    drawText("Day:", 60, 220, 14, GRAY);
+    if (drawSmallButton(120, 215, 30, 25, "-", GRAY) && editDay > 1) editDay--;
+    drawText(to_string(editDay), 160, 220, 14, BLACK);
+    if (drawSmallButton(190, 215, 30, 25, "+", GRAY) && editDay < 28) editDay++;
+    
+    drawText("Month:", 250, 220, 14, GRAY);
+    if (drawSmallButton(320, 215, 30, 25, "-", GRAY) && editMonth > 1) editMonth--;
+    drawText(to_string(editMonth), 360, 220, 14, BLACK);
+    if (drawSmallButton(390, 215, 30, 25, "+", GRAY) && editMonth < 12) editMonth++;
+    
+    drawText("Nights:", 60, 270, 16, BLACK);
+    if (drawSmallButton(140, 265, 35, 30, "-", GRAY) && editNights > 1) editNights--;
+    drawText(to_string(editNights), 190, 270, 16, BLACK);
+    if (drawSmallButton(230, 265, 35, 30, "+", GRAY) && editNights < 30) editNights++;
+
+    drawText("Guests:", 400, 270, 16, BLACK);
+    if (drawSmallButton(480, 265, 35, 30, "-", GRAY) && editGuests > 1) editGuests--;
+    drawText(to_string(editGuests), 530, 270, 16, BLACK);
+    if (drawSmallButton(570, 265, 35, 30, "+", GRAY) && editGuests < 20) editGuests++;
+    
+    int roomsNeeded = (editGuests + MAX_GUESTS_PER_ROOM - 1) / MAX_GUESTS_PER_ROOM;
+    drawText("Rooms: " + to_string(roomsNeeded), 60, 320, 14, GRAY);
+    
+    int checkoutDay, checkoutMonth, checkoutYear;
+    calculateCheckoutDate(editDay, editMonth, editYear, editNights, checkoutDay, checkoutMonth, checkoutYear);
+    
+    drawText("Checkout: " + formatDate(checkoutDay, checkoutMonth, checkoutYear), 60, 350, 14, GRAY);
+    
+    float newCost = hotel->currentPrice * editNights * roomsNeeded;
+    
+    drawRoundedBox(60, 400, 400, 80, PAKISTAN_GREEN);
+    drawText("New Total Cost", 100, 420, 14, WHITE);
+    drawText("Rs." + to_string((int)newCost), 100, 450, 24, WHITE);
+    
+    float difference = newCost - booking.totalCost;
+    Color diffColor = difference > 0 ? DANGER_RED : SUCCESS_GREEN;
+    drawRoundedBox(500, 400, 400, 80, Fade(diffColor, 0.2f));
+    drawText("Difference", 540, 420, 14, DARKGRAY);
+    string diffText = (difference > 0 ? "+" : "") + to_string((int)difference);
+    drawText("Rs." + diffText, 540, 450, 24, diffColor);
+
+    bool exceedsBudget = user.maxBudget > 0 && 
+                         (user.totalSpent - booking.totalCost + newCost) > user.maxBudget;
+    
+    if (exceedsBudget) {
+        drawRoundedBox(60, 510, 840, 30, DANGER_RED);
+        drawText("New total would exceed budget!", 100, 517, 14, WHITE);
+    }
+    
+    if (drawButton(150, 580, 200, 50, "Update", Color{34, 197, 94, 255})) {
+        if (!exceedsBudget) {
+            user.totalSpent -= booking.totalCost;
+            booking.nights = editNights;
+            booking.guests = editGuests;
+            booking.rooms = roomsNeeded;
+            booking.totalCost = newCost;
+            booking.checkInDate = formatDate(editDay, editMonth, editYear);
+            booking.checkOutDate = formatDate(checkoutDay, checkoutMonth, checkoutYear);
+            user.totalSpent += newCost;
+            
+            saveGame();
+            messageText = "Booking updated successfully!";
+            currentScreen = SCREEN_MESSAGE;
+        } else {
+            messageText = "Cannot update: Exceeds budget!";
+            currentScreen = SCREEN_MESSAGE;
+        }
+    }
+    if (drawButton(674, 580, 200, 50, "Cancel", DANGER_RED)) {
+        currentScreen = SCREEN_BOOKINGS;
+    }
+}
+
+
 void drawMessageScreen(){
     ClearBackground(LIGHT);
     drawRoundedBox(262, 250, 500, 250, WHITE);
