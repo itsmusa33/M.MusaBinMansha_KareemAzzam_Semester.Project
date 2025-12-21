@@ -4,6 +4,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <cctype>
+#include <fstream> 
 using namespace std;
 //constants
 const int WINDOW_WIDTH = 1024;
@@ -15,10 +16,18 @@ const int MAX_GUESTS_PER_ROOM = 4;
 const int TRAVEL_GOAL = 5;
 const int MAX_CATEGORIES = 5;
 const int MAX_PREFERRED_CITIES = 3;
+const int MAX_WEATHER = 7;
+const int MAX_VISITED_HOTELS = 100;
 //categories and cities strings
 const string CATEGORIES[MAX_CATEGORIES] = {
     "Luxury", "Budget", "Business", "Resort", "Heritage"
 };
+
+// Weather type constants: 0=normal, 1=rain, 2=festival
+const int WEATHER_NORMAL = 0;
+const int WEATHER_RAIN = 1;
+const int WEATHER_FESTIVAL = 2;
+
 const string CITIES[MAX_CITIES] = {
     "Islamabad", "Lahore", "Karachi", "Peshawar",
     "Quetta", "Gilgit", "Muzaffarabad"
@@ -29,6 +38,13 @@ const Color PakGreen = {0, 102, 51, 255};
 const Color Red = {239, 68, 68, 255};    
 const Color SuccessGreen = {34, 197, 94, 255};
 //Data structures
+struct Weather 
+{
+    string city;
+    int type;              // 0=normal, 1=rain, 2=festival
+    float priceMultiplier; // multiplier applied to hotel prices
+};
+
 struct Hotel {
     string name;
     string city;
@@ -75,12 +91,19 @@ enum Screen {
     SCREEN_EXPLORE,
     SCREEN_DETAIL,
     SCREEN_BOOKINGS,
-    SCREEN_MESSAGE
-    SCREEN_SEARCH
+    SCREEN_MESSAGE,
+    SCREEN_SEARCH,
+    SCREEN_EDIT_BOOKING
 };
+
 // Global arrays
 Hotel hotels[MAX_HOTELS];
 int hotelCount = 0;
+
+Weather weatherData[MAX_WEATHER];
+int weatherCount = 0;
+
+
 Booking bookings[MAX_BOOKINGS];
 int bookingCount = 0;
 Font appFont;
@@ -88,11 +111,17 @@ UserProfile user;
 
 Screen currentScreen = SCREEN_SPLASH;
 int selectedHotelIndex = -1;
+string visitedHotelNames[MAX_VISITED_HOTELS];
+string visitedHotelCities[MAX_VISITED_HOTELS];
+int visitedHotelCount = 0;
+
+int selectedBookingIndex = -1;
 int scrollPosition = 0;
 float splashTimer = 0;
 string inputText = "";
 string messageText = "";
 //Booking form variables
+float searchMaxPrice = 50000; 
 int nights = 1;
 int guests = 2;
 int bookingDay = 20;
@@ -140,6 +169,63 @@ bool containsIgnoreCase(string text, string search)
     return position != (int)string::npos;
 }
 
+// Parse a date string "DD-MM-YYYY" into day, month, year
+void parseDate(string dateStr, int& day, int& month, int& year) {
+    int dash1 = dateStr.find('-');
+    int dash2 = dateStr.find('-', dash1 + 1);
+    day = stoi(dateStr.substr(0, dash1));
+    month = stoi(dateStr.substr(dash1 + 1, dash2 - dash1 - 1));
+    year = stoi(dateStr.substr(dash2 + 1));
+}
+
+void calculateCheckoutDate(int startDay, int startMonth, int startYear, int numNights,
+                           int& outDay, int& outMonth, int& outYear) {
+    outDay = startDay + numNights;
+    outMonth = startMonth;
+    outYear = startYear;
+while (outDay > 30) {
+        outDay -= 30;
+        outMonth++;
+        if (outMonth > 12) {
+            outMonth = 1;
+            outYear++;
+        }
+    }
+}
+
+void drawScreenHeader(string title, Screen backScreen);  // Forward declaration
+bool isDateInPast(int day, int month, int year) {
+    if (year < appYear) return true;
+    if (year > appYear) return false;
+    if (month < appMonth) return true;
+    if (month > appMonth) return false;
+    return day < appDay;
+}
+
+bool hasDateConflict(int startDay, int startMonth, int numNights, int excludeIndex = -1) {
+    int endDay = startDay + numNights;
+    int endMonth = startMonth;
+    while (endDay > 30) {
+        endDay -= 30;
+        endMonth++;
+    }
+
+    for (int i = 0; i < bookingCount; i++) {
+        if (i == excludeIndex) continue;
+        if (!bookings[i].isActive) continue;
+        
+        int bDay, bMonth, bYear;
+        parseDate(bookings[i].checkInDate, bDay, bMonth, bYear);
+        int bEndDay, bEndMonth, bEndYear;
+        parseDate(bookings[i].checkOutDate, bEndDay, bEndMonth, bEndYear);
+        
+        if (!(endDay < bDay || startDay > bEndDay)) {
+            return true;
+        }
+       }
+    return false;
+}
+
 
 //functions for color
 Color getCategoryColor(string category) {
@@ -161,6 +247,26 @@ Color getCityColor(string city) {
     if (city == "Muzaffarabad") return Color{236, 72, 153, 255};
     return Color{107, 114, 128, 255};
 }
+
+Color getWeatherColor(int weatherType) {
+    if (weatherType == WEATHER_RAIN) return Color{100, 149, 237, 255};
+    if (weatherType == WEATHER_FESTIVAL) return Color{255, 165, 0, 255};
+    return Color{135, 206, 235, 255};
+}
+
+string getWeatherIcon(int weatherType) {
+    if (weatherType == WEATHER_RAIN) return "~";
+    if (weatherType == WEATHER_FESTIVAL) return "*";
+    return "o";
+}
+
+string getWeatherName(int weatherType) {
+    if (weatherType == WEATHER_RAIN) return "Rainy";
+    if (weatherType == WEATHER_FESTIVAL) return "Festival";
+    return "Normal";
+}
+
+
 //helper functions for drawing gui elements
 void drawText(string text, int x, int y, int size, Color color){
     DrawTextEx(appFont, text.c_str(), {(float)x, (float)y}, (float)size, 1, color);
@@ -224,6 +330,68 @@ void addHotel(string name, string city, string category, float price, float rati
         h.dealPercent = 0;}
     hotels[hotelCount++] = h;
 }
+
+void initializeWeather() {
+    weatherCount = 0;
+    
+    for (int i = 0; i < MAX_CITIES && weatherCount < MAX_WEATHER; i++) {
+        Weather w;
+        w.city = CITIES[i];
+        
+        int chance = rand() % 100;
+        if (chance < 60) {
+            w.type = WEATHER_NORMAL;
+            w.priceMultiplier = 1.0f;
+        } else if (chance < 85) {
+            w.type = WEATHER_RAIN;
+            w.priceMultiplier = 0.85f;
+        } else {
+            w.type = WEATHER_FESTIVAL;
+            w.priceMultiplier = 1.25f;
+        }
+        
+        weatherData[weatherCount] = w;
+        weatherCount++;
+    }
+}
+Weather* getWeatherForCity(string city) {
+    for (int i = 0; i < weatherCount; i++) {
+        if (weatherData[i].city == city) {
+            return &weatherData[i];
+        }
+    }
+    return nullptr;
+}
+
+float getPriceMultiplier(bool budgetMode) {
+    if (budgetMode) {
+        return 0.95f;
+    } else {
+        return 1.10f;
+    }
+}
+void updateHotelPrices() {
+    for (int i = 0; i < hotelCount; i++) {
+        Hotel& h = hotels[i];
+        
+        float price = h.basePrice;
+        
+        Weather* w = getWeatherForCity(h.city);
+        if (w != nullptr) {
+            price *= w->priceMultiplier;
+        }
+        
+        if (h.hasDeal) {
+            price *= (1.0f - h.dealPercent / 100.0f);
+        }
+        
+        price *= getPriceMultiplier(user.budgetMode);
+        
+        h.currentPrice = price;
+    }
+}
+
+
 void initializeHotels() {
     hotelCount = 0;
     //Islamabad
