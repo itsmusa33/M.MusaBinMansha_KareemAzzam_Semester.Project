@@ -3,6 +3,8 @@
 #include <cmath>
 #include <ctime>
 #include <cstdlib>
+#include <cctype>
+#include <fstream> 
 using namespace std;
 //constants
 const int WINDOW_WIDTH = 1024;
@@ -14,10 +16,18 @@ const int MAX_GUESTS_PER_ROOM = 4;
 const int TRAVEL_GOAL = 5;
 const int MAX_CATEGORIES = 5;
 const int MAX_PREFERRED_CITIES = 3;
+const int MAX_WEATHER = 7;
+const int MAX_VISITED_HOTELS = 100;
 //categories and cities strings
 const string CATEGORIES[MAX_CATEGORIES] = {
     "Luxury", "Budget", "Business", "Resort", "Heritage"
 };
+
+// Weather type constants: 0=normal, 1=rain, 2=festival
+const int WEATHER_NORMAL = 0;
+const int WEATHER_RAIN = 1;
+const int WEATHER_FESTIVAL = 2;
+
 const string CITIES[MAX_CITIES] = {
     "Islamabad", "Lahore", "Karachi", "Peshawar",
     "Quetta", "Gilgit", "Muzaffarabad"
@@ -28,6 +38,13 @@ const Color PakGreen = {0, 102, 51, 255};
 const Color Red = {239, 68, 68, 255};    
 const Color SuccessGreen = {34, 197, 94, 255};
 //Data structures
+struct Weather 
+{
+    string city;
+    int type;              // 0=normal, 1=rain, 2=festival
+    float priceMultiplier; // multiplier applied to hotel prices
+};
+
 struct Hotel {
     string name;
     string city;
@@ -74,11 +91,19 @@ enum Screen {
     SCREEN_EXPLORE,
     SCREEN_DETAIL,
     SCREEN_BOOKINGS,
-    SCREEN_MESSAGE
+    SCREEN_MESSAGE,
+    SCREEN_SEARCH,
+    SCREEN_EDIT_BOOKING
 };
+
 // Global arrays
 Hotel hotels[MAX_HOTELS];
 int hotelCount = 0;
+
+Weather weatherData[MAX_WEATHER];
+int weatherCount = 0;
+
+
 Booking bookings[MAX_BOOKINGS];
 int bookingCount = 0;
 Font appFont;
@@ -86,11 +111,17 @@ UserProfile user;
 
 Screen currentScreen = SCREEN_SPLASH;
 int selectedHotelIndex = -1;
+string visitedHotelNames[MAX_VISITED_HOTELS];
+string visitedHotelCities[MAX_VISITED_HOTELS];
+int visitedHotelCount = 0;
+
+int selectedBookingIndex = -1;
 int scrollPosition = 0;
 float splashTimer = 0;
 string inputText = "";
 string messageText = "";
 //Booking form variables
+float searchMaxPrice = 50000; 
 int nights = 1;
 int guests = 2;
 int bookingDay = 20;
@@ -117,6 +148,85 @@ string generateBookingId() {
     return to_string(num);
 }
 
+bool containsIgnoreCase(string text, string search) 
+{
+    if (search.empty()) return true;
+    if (text.empty()) return false;
+    
+    string textLower = "";
+    for (int i = 0; i < (int)text.length(); i++)
+    {
+        textLower += tolower(text[i]);
+    }
+
+    string searchLower = "";
+    for (int i = 0; i < (int)search.length(); i++) 
+    {
+        searchLower += tolower(search[i]);
+    }
+    
+    int position = textLower.find(searchLower);
+    return position != (int)string::npos;
+}
+
+// Parse a date string "DD-MM-YYYY" into day, month, year
+void parseDate(string dateStr, int& day, int& month, int& year) {
+    int dash1 = dateStr.find('-');
+    int dash2 = dateStr.find('-', dash1 + 1);
+    day = stoi(dateStr.substr(0, dash1));
+    month = stoi(dateStr.substr(dash1 + 1, dash2 - dash1 - 1));
+    year = stoi(dateStr.substr(dash2 + 1));
+}
+
+void calculateCheckoutDate(int startDay, int startMonth, int startYear, int numNights,
+                           int& outDay, int& outMonth, int& outYear) {
+    outDay = startDay + numNights;
+    outMonth = startMonth;
+    outYear = startYear;
+while (outDay > 30) {
+        outDay -= 30;
+        outMonth++;
+        if (outMonth > 12) {
+            outMonth = 1;
+            outYear++;
+        }
+    }
+}
+
+void drawScreenHeader(string title, Screen backScreen);  // Forward declaration
+bool isDateInPast(int day, int month, int year) {
+    if (year < appYear) return true;
+    if (year > appYear) return false;
+    if (month < appMonth) return true;
+    if (month > appMonth) return false;
+    return day < appDay;
+}
+
+bool hasDateConflict(int startDay, int startMonth, int numNights, int excludeIndex = -1) {
+    int endDay = startDay + numNights;
+    int endMonth = startMonth;
+    while (endDay > 30) {
+        endDay -= 30;
+        endMonth++;
+    }
+
+    for (int i = 0; i < bookingCount; i++) {
+        if (i == excludeIndex) continue;
+        if (!bookings[i].isActive) continue;
+        
+        int bDay, bMonth, bYear;
+        parseDate(bookings[i].checkInDate, bDay, bMonth, bYear);
+        int bEndDay, bEndMonth, bEndYear;
+        parseDate(bookings[i].checkOutDate, bEndDay, bEndMonth, bEndYear);
+        
+        if (!(endDay < bDay || startDay > bEndDay)) {
+            return true;
+        }
+       }
+    return false;
+}
+
+
 //functions for color
 Color getCategoryColor(string category) {
     if (category == "Luxury") return Color{168, 85, 247, 255};
@@ -137,6 +247,26 @@ Color getCityColor(string city) {
     if (city == "Muzaffarabad") return Color{236, 72, 153, 255};
     return Color{107, 114, 128, 255};
 }
+
+Color getWeatherColor(int weatherType) {
+    if (weatherType == WEATHER_RAIN) return Color{100, 149, 237, 255};
+    if (weatherType == WEATHER_FESTIVAL) return Color{255, 165, 0, 255};
+    return Color{135, 206, 235, 255};
+}
+
+string getWeatherIcon(int weatherType) {
+    if (weatherType == WEATHER_RAIN) return "~";
+    if (weatherType == WEATHER_FESTIVAL) return "*";
+    return "o";
+}
+
+string getWeatherName(int weatherType) {
+    if (weatherType == WEATHER_RAIN) return "Rainy";
+    if (weatherType == WEATHER_FESTIVAL) return "Festival";
+    return "Normal";
+}
+
+
 //helper functions for drawing gui elements
 void drawText(string text, int x, int y, int size, Color color){
     DrawTextEx(appFont, text.c_str(), {(float)x, (float)y}, (float)size, 1, color);
@@ -200,6 +330,68 @@ void addHotel(string name, string city, string category, float price, float rati
         h.dealPercent = 0;}
     hotels[hotelCount++] = h;
 }
+
+void initializeWeather() {
+    weatherCount = 0;
+    
+    for (int i = 0; i < MAX_CITIES && weatherCount < MAX_WEATHER; i++) {
+        Weather w;
+        w.city = CITIES[i];
+        
+        int chance = rand() % 100;
+        if (chance < 60) {
+            w.type = WEATHER_NORMAL;
+            w.priceMultiplier = 1.0f;
+        } else if (chance < 85) {
+            w.type = WEATHER_RAIN;
+            w.priceMultiplier = 0.85f;
+        } else {
+            w.type = WEATHER_FESTIVAL;
+            w.priceMultiplier = 1.25f;
+        }
+        
+        weatherData[weatherCount] = w;
+        weatherCount++;
+    }
+}
+Weather* getWeatherForCity(string city) {
+    for (int i = 0; i < weatherCount; i++) {
+        if (weatherData[i].city == city) {
+            return &weatherData[i];
+        }
+    }
+    return nullptr;
+}
+
+float getPriceMultiplier(bool budgetMode) {
+    if (budgetMode) {
+        return 0.95f;
+    } else {
+        return 1.10f;
+    }
+}
+void updateHotelPrices() {
+    for (int i = 0; i < hotelCount; i++) {
+        Hotel& h = hotels[i];
+        
+        float price = h.basePrice;
+        
+        Weather* w = getWeatherForCity(h.city);
+        if (w != nullptr) {
+            price *= w->priceMultiplier;
+        }
+        
+        if (h.hasDeal) {
+            price *= (1.0f - h.dealPercent / 100.0f);
+        }
+        
+        price *= getPriceMultiplier(user.budgetMode);
+        
+        h.currentPrice = price;
+    }
+}
+
+
 void initializeHotels() {
     hotelCount = 0;
     //Islamabad
@@ -244,7 +436,9 @@ void initializeHotels() {
     addHotel("Kashmir Continental", "Muzaffarabad", "Business", 5000, 3.9f, false);
     addHotel("Red Onion Hotel", "Muzaffarabad", "Budget", 3000, 3.7f, false);
     addHotel("Neelum View", "Muzaffarabad", "Resort", 6000, 4.0f, false);
-    
+
+    // Update prices based on weather after initialization
+    updateHotelPrices();
 }
 //functions for booking
 bool createBooking(int hotelIndex, int numNights, int numGuests) {
@@ -282,8 +476,34 @@ bool createBooking(int hotelIndex, int numNights, int numGuests) {
     user.totalBookings++;
     user.totalSpent += totalCost;
     user.placesVisited++;
+    saveGame();
     return true;
 }
+
+int SearchHotels(int outResults[], int maxResults,
+                 string name, string city,
+                 string category, float minPrice, float maxPrice) {
+    int count = 0;
+
+    for (int i = 0; i < hotelCount && count < maxResults; i++) {
+        Hotel h = hotels[i];
+        if (!h.isActive) continue;
+
+        bool nameMatch = containsIgnoreCase(h.name, name);
+        bool cityMatch = containsIgnoreCase(h.city, city);
+        bool categoryMatch = containsIgnoreCase(h.category, category);
+        bool priceMatch = (h.currentPrice >= minPrice && h.currentPrice <= maxPrice);
+
+        if (nameMatch && cityMatch && categoryMatch && priceMatch) {
+            outResults[count] = i;
+            count++;
+        }
+    }
+
+    return count;
+}
+
+
 bool cancelBooking(int index) {
     if (index < 0 || index >= bookingCount) return false;
     if (!bookings[index].isActive) return false;
@@ -294,34 +514,225 @@ bool cancelBooking(int index) {
     bookings[index].isActive = false;
     return true;
 }
+
+void drawWeatherAlerts(int x, int y) {
+    drawText("Weather Alerts:", x, y, 16, BLACK);
+    
+    int alertY = y + 30;
+    int alertCount = 0;
+    
+    for (int i = 0; i < weatherCount && alertCount < 4; i++) {
+        Weather& w = weatherData[i];
+        
+        if (w.type != WEATHER_NORMAL) {
+            Color alertColor = getWeatherColor(w.type);
+            string icon = getWeatherIcon(w.type);
+            string weatherName = getWeatherName(w.type);
+            
+            drawRoundedBox(x, alertY, 280, 35, Fade(alertColor, 0.2f));
+            drawRoundedBox(x, alertY, 5, 35, alertColor);
+            
+            drawText(icon, x + 15, alertY + 8, 18, alertColor);
+            string alertText = w.city + ": " + weatherName;
+            drawText(alertText, x + 40, alertY + 10, 14, DARKGRAY);
+            
+            string impact;
+            if (w.type == WEATHER_RAIN) {
+                impact = "-15%";
+                drawText(impact, x + 230, alertY + 10, 14, SUCCESS_GREEN);
+            } else if (w.type == WEATHER_FESTIVAL) {
+                impact = "+25%";
+                drawText(impact, x + 230, alertY + 10, 14, DANGER_RED);
+            }
+		alertY += 42;
+            alertCount++;
+        }
+    }
+    
+    if (alertCount == 0) {
+        drawText("All cities have normal weather", x + 10, alertY, 14, GRAY);
+    }
+}
+
+void drawWeatherIndicator(int x, int y, string city) {
+    Weather* w = getWeatherForCity(city);
+    if (w == nullptr) return;
+    
+    Color weatherColor = getWeatherColor(w->type);
+    string icon = getWeatherIcon(w->type);
+    string weatherName = getWeatherName(w->type);
+    
+    drawRoundedBox(x, y, 100, 28, Fade(weatherColor, 0.3f));
+    drawText(icon, x + 10, y + 5, 16, weatherColor);
+    drawText(weatherName, x + 30, y + 7, 12, DARKGRAY);
+}
+
+void saveGame() {
+    ofstream file("musafir_save.txt");
+    if (!file.is_open()) return;
+    
+    file << user.name << "\n";
+    file << user.totalBookings << "\n";
+    file << user.totalSpent << "\n";
+    file << user.placesVisited << "\n";
+    file << user.maxBudget << "\n";
+    file << (user.budgetMode ? 1 : 0) << "\n";
+    file << user.level << "\n";
+    
+    file << visitedHotelCount << "\n";
+    for (int i = 0; i < visitedHotelCount; i++) {
+        file << visitedHotelNames[i] << "\n";
+        file << visitedHotelCities[i] << "\n";
+    }
+    
+    int activeBookings = 0;
+    for (int i = 0; i < bookingCount; i++) {
+        if (bookings[i].isActive) activeBookings++;
+    }
+    file << activeBookings << "\n";
+
+for (int i = 0; i < bookingCount; i++) {
+        const Booking& b = bookings[i];
+        if (!b.isActive) continue;
+        file << b.hotelName << "\n";
+        file << b.city << "\n";
+        file << b.bookingId << "\n";
+        file << b.checkInDate << "\n";
+        file << b.checkOutDate << "\n";
+        file << b.nights << "\n";
+        file << b.guests << "\n";
+        file << b.rooms << "\n";
+        file << b.totalCost << "\n";
+    }
+    
+    file.close();
+}
+
+bool loadGame() {
+    ifstream file("musafir_save.txt");
+    if (!file.is_open()) return false;
+    
+    getline(file, user.name);
+    file >> user.totalBookings;
+    file >> user.totalSpent;
+    file >> user.placesVisited;
+    file >> user.maxBudget;
+    int budgetMode;
+    file >> budgetMode;
+    user.budgetMode = (budgetMode == 1);
+    file >> user.level;
+    
+    file >> visitedHotelCount;
+    file.ignore();
+    if (visitedHotelCount < 0) visitedHotelCount = 0;
+    if (visitedHotelCount > MAX_VISITED_HOTELS) visitedHotelCount = MAX_VISITED_HOTELS;
+    for (int i = 0; i < visitedHotelCount; i++) {
+        getline(file, visitedHotelNames[i]);
+        getline(file, visitedHotelCities[i]);
+    }
+      int loadedCount;
+    file >> loadedCount;
+    file.ignore();
+    
+    for (int i = 0; i < MAX_BOOKINGS; i++) {
+        bookings[i].isActive = false;
+    }
+
+    if (loadedCount < 0) loadedCount = 0;
+    if (loadedCount > MAX_BOOKINGS) loadedCount = MAX_BOOKINGS;
+
+    bookingCount = 0;
+    for (int i = 0; i < loadedCount; i++) {
+        Booking b;
+        getline(file, b.hotelName);
+        getline(file, b.city);
+        getline(file, b.bookingId);
+        getline(file, b.checkInDate);
+        getline(file, b.checkOutDate);
+        file >> b.nights;
+        file >> b.guests;
+        file >> b.rooms;
+        file >> b.totalCost;
+        file.ignore();
+        b.isActive = true;
+		
+	  if (bookingCount < MAX_BOOKINGS) {
+            bookings[bookingCount] = b;
+            bookingCount++;
+        }
+    }
+    
+    file.close();
+    return !user.name.empty();
+}
+
+void initializeApp() {
+    user.name = "";
+    user.totalBookings = 0;
+    user.totalSpent = 0;
+    user.placesVisited = 0;
+    user.travelerScore = 0;
+    user.level = 0;
+    user.maxBudget = 50000;
+    user.budgetMode = true;
+    user.preferredCityCount = 0;
+    for (int i = 0; i < MAX_PREFERRED_CITIES; i++) user.preferredCities[i] = "";
+    
+    visitedHotelCount = 0;
+    for (int i = 0; i < MAX_VISITED_HOTELS; i++) {
+        visitedHotelNames[i] = "";
+        visitedHotelCities[i] = "";
+    }
+    
+    initializeWeather();
+    initializeHotels();
+
+    bookingCount = 0;
+    for (int i = 0; i < MAX_BOOKINGS; i++) bookings[i].isActive = false;
+}
+
+void drawScreenHeader(string title, Screen backScreen) {
+    ClearBackground(BG_LIGHT);
+    DrawRectangle(0, 0, 1024, 60, WHITE);
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        currentScreen = backScreen;
+    }
+    int titleWidth = measureText(title, 24);
+    drawText(title, (1024 - titleWidth) / 2, 18, 24, BLACK);
+}
+
+
 //Functions for screen
 void drawSplashScreen() {
     splashTimer += GetFrameTime();
+    
     ClearBackground(PAKISTAN_GREEN);
-    //bouncing effect for the icon
+    
     float bounce = sinf(splashTimer * 3) * 10;
     DrawCircle(WINDOW_WIDTH / 2, 220 + (int)bounce, 60, WHITE);
-    //Musafir text and smily face
     int faceWidth = measureText("(^.^)", 60);
     drawText("(^.^)", (WINDOW_WIDTH - faceWidth) / 2, 190 + (int)bounce, 60, Color{0, 102, 51, 255});
     
     int titleWidth = measureText("MUSAFIR", 64);
     drawText("MUSAFIR", (WINDOW_WIDTH - titleWidth) / 2, 330, 64, WHITE);
-    
     int subTitleWidth = measureText("Pakistan Travel Guide", 24);
     drawText("Pakistan Travel Guide", (WINDOW_WIDTH - subTitleWidth) / 2, 410, 24, Color{200, 255, 200, 255});
     
-    //loading bar
     float progress = splashTimer / 2.0f;
     if (progress > 1.0f) progress = 1.0f;
     DrawRectangle((WINDOW_WIDTH - 200) / 2, 500, (int)(200 * progress), 10, WHITE);
     
-    //after 3 sec load data and move to login
-    if (splashTimer >= 2.5f){
-        initializeHotels();
-        currentScreen = SCREEN_LOGIN;
+    if (splashTimer >= 2.5f) {
+        if (loadGame()) {
+            initializeHotels();
+            currentScreen = SCREEN_HOME;
+        } else {
+            initializeApp();
+            currentScreen = SCREEN_LOGIN;
+        }
     }
 }
+
 
 void drawLoginScreen(){
     ClearBackground(Color{240, 245, 240, 255});
@@ -351,9 +762,23 @@ void drawLoginScreen(){
     
     // Travel Style Toggle
     drawText("Travel Mode:", 250, 460, 18, DARKGRAY);
-    if (drawButton(250, 495, 140, 45, "Budget", user.budgetMode ? Color{34, 197, 94, 255} : GRAY)) user.budgetMode = true;
-    if (drawButton(410, 495, 140, 45, "Luxury", !user.budgetMode ? Color{168, 85, 247, 255} : GRAY)) user.budgetMode = false;
-    
+    if (drawButton(250, 495, 140, 45, "Budget", budgetBtnColor)) {
+        user.budgetMode = true;
+        updateHotelPrices();
+    }
+    if (drawButton(410, 495, 140, 45, "Luxury", luxuryBtnColor)) {
+        user.budgetMode = false;
+        updateHotelPrices();
+    }
+
+    if (drawButton(380, 580, 260, 55, "Start Journey", PakGreen)) {
+        if (!inputText.empty()) {
+            user.name = inputText;
+            saveGame();
+            currentScreen = SCREEN_HOME;
+        }
+    }
+
     // Submit button - requires a name to proceed
     if (drawButton(380, 570, 260, 55, "Start Journey", PAKISTAN_GREEN)) {
         if (!inputText.empty()) {
@@ -380,6 +805,12 @@ void drawHomeScreen() {
         currentScreen = SCREEN_EXPLORE;
     }
     if (drawButton(260, 180, 200, 50, "My Bookings", Color{34, 197, 94, 255})) currentScreen = SCREEN_BOOKINGS;
+
+    if (drawButton(480, 180, 200, 50, "Search", Color{168, 85, 247, 255})) 
+    {
+    scrollPosition = 0;
+    currentScreen = SCREEN_SEARCH;
+    }
     // Recommendation List (Shows first 3 active hotels)
     drawText("Recommended For You", 40, 260, 18, BLACK);
     int y = 295;
@@ -397,7 +828,7 @@ void drawHomeScreen() {
         
         //Show a red badge if there's a discount
         if (h.hasDeal) {
-            drawRoundedBox(840, y + 10, 80, 25, Red;
+            drawRoundedBox(840, y + 10, 80, 25, Red);
             drawText(to_string((int)h.dealPercent) + "% OFF!", 855, y + 15, 13, WHITE);
         }
         
@@ -413,12 +844,72 @@ void drawExploreScreen(){
     if (drawButton(15, 12, 40, 40, "<", GRAY)) currentScreen = SCREEN_HOME; //Back button
     drawText("Explore Pakistan", (1024 - measureText("Explore Pakistan", 24)) / 2, 18, 24, BLACK);
     //Loop through hotels with a simple scroll offset (scrollPosition)
-    int y = 85;
-    int maxVisible = 7;
-    int displayedCount = 0;
-    for (int i = scrollPosition; i < hotelCount && displayedCount < maxVisible; i++) {
-        const Hotel& h = hotels[i];
-        if (!h.isActive) continue;
+    // City filter
+int filterX = 40;
+bool allSelected = searchCity.empty();
+if (drawSmallButton(filterX, 70, 60, 30, "All", allSelected ? PakGreen : GRAY)) {
+    searchCity = "";
+}
+filterX += 70;
+
+for (int i = 0; i < MAX_CITIES; i++) {
+    bool isSelected = (searchCity == CITIES[i]);
+    Color btnColor = isSelected ? getCityColor(CITIES[i]) : GRAY;
+    if (drawSmallButton(filterX, 70, 110, 30, CITIES[i], btnColor)) {
+        if (isSelected) searchCity = "";
+        else searchCity = CITIES[i];
+    }
+    filterX += 118;
+}
+
+// Get filtered hotels
+int results[MAX_HOTELS];
+int resultCount = SearchHotels(results, MAX_HOTELS, "", searchCity, "", 0, 999999);
+
+int y = 115;
+int maxVisible = 6;
+
+for (int idx = scrollPosition; idx < resultCount && idx < scrollPosition + maxVisible; idx++) {
+    int i = results[idx];
+    const Hotel& h = hotels[i];
+    
+    drawRoundedBox(40, y, 940, 85, WHITE);
+    drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
+    
+    drawText(h.name, 65, y + 12, 18, BLACK);
+    string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
+    drawText(info, 65, y + 42, 14, GRAY);
+    
+    if (h.hasDeal) {
+        string deal = to_string((int)h.dealPercent) + "% OFF!";
+        drawRoundedBox(800, y + 10, 80, 25, Red);
+        drawText(deal, 815, y + 15, 13, WHITE);
+    }
+    
+    string rating = to_string(h.rating).substr(0, 3);
+    drawText(rating, 900, y + 40, 18, Color{234, 179, 8, 255});
+    
+    if (CheckCollisionPointRec(GetMousePosition(), {40, (float)y, 940, 85}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)){
+        selectedHotelIndex = i;
+        nights = 1;
+        guests = 2;
+        bookingDay = appDay;
+        bookingMonth = appMonth;
+        bookingYear = appYear;
+        currentScreen = SCREEN_DETAIL;
+    }
+    
+    y += 95;
+}
+
+// Scroll controls
+if (scrollPosition > 0 && drawButton(450, 720, 70, 35, "Up", GRAY)) scrollPosition--;
+if (scrollPosition + maxVisible < resultCount && drawButton(530, 720, 70, 35, "Down", GRAY)) scrollPosition++;
+
+int showing = resultCount - scrollPosition;
+if (showing > maxVisible) showing = maxVisible;
+string countText = "Showing " + to_string(showing) + " of " + to_string(resultCount);
+drawText(countText, 40, 725, 14, GRAY);
         //Card UI for each hotel
         drawRoundedBox(40, y, 940, 85, WHITE);
         drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
@@ -428,7 +919,7 @@ void drawExploreScreen(){
         drawText(info, 65, y + 42, 14, GRAY);
         
         if (h.hasDeal) {
-            drawRoundedBox(800, y + 10, 80, 25, Red;
+            drawRoundedBox(800, y + 10, 80, 25, Red);
             drawText(to_string((int)h.dealPercent) + "% OFF!", 815, y + 15, 13, WHITE);
         }
         
@@ -546,7 +1037,7 @@ void drawBookingsScreen() {
         currentScreen = SCREEN_HOME;
     drawText("My Bookings", 440, 18, 24, BLACK);
     //Header showing the current financial summary
-    drawText("Your Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent), 650, 28, 14, Color{0, 102, 51, 255})
+    drawText("Your Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent), 650, 28, 14, Color{0, 102, 51, 255});
     //Count active bookings
     int activeCount = 0;
     for (int i = 0; i < bookingCount; i++){
@@ -582,6 +1073,15 @@ void drawBookingsScreen() {
         //total cost
         string total = "Rs." + to_string((int)b.totalCost);
         drawText(total, 800, y + 20, 24, Color{34, 197, 94, 255});
+
+		// Edit button
+        if (drawButton(810, y + 55, 80, 32, "Edit", Color{59, 130, 246, 255})) {
+            selectedBookingIndex = i;
+            editNights = b.nights;
+            editGuests = b.guests;
+            parseDate(b.checkInDate, editDay, editMonth, editYear);
+            currentScreen = SCREEN_EDIT_BOOKING;
+        }
         
         //Cancel button
         if (drawButton(810, y + 70, 80, 32, "Cancel", DANGER_RED)) {
@@ -594,6 +1094,112 @@ void drawBookingsScreen() {
         y += cardHeight + 10;
     }
 }
+
+void drawEditBookingScreen() {
+    if (selectedBookingIndex < 0 || selectedBookingIndex >= bookingCount) {
+        currentScreen = SCREEN_BOOKINGS;
+        return;
+    }
+    
+    Booking& booking = bookings[selectedBookingIndex];
+    Hotel* hotel = nullptr;
+    
+    for (int i = 0; i < hotelCount; i++) {
+        if (hotels[i].name == booking.hotelName && hotels[i].city == booking.city) {
+            hotel = &hotels[i];
+            break;
+        }
+    }
+    
+    if (hotel == nullptr) {
+        currentScreen = SCREEN_BOOKINGS;
+        return;
+    }
+    drawScreenHeader("Edit Booking", SCREEN_BOOKINGS);
+    
+    drawRoundedBox(30, 75, 964, 650, WHITE);
+    
+    drawText("Hotel: " + booking.hotelName, 60, 110, 18, BLACK);
+    drawText("City: " + booking.city, 60, 140, 14, GRAY);
+    
+    drawText("Check-in Date:", 60, 180, 16, BLACK);
+    string dateDisplay = formatDate(editDay, editMonth, editYear);
+    drawText(dateDisplay, 400, 180, 16, PAKISTAN_GREEN);
+    
+    drawText("Day:", 60, 220, 14, GRAY);
+    if (drawSmallButton(120, 215, 30, 25, "-", GRAY) && editDay > 1) editDay--;
+    drawText(to_string(editDay), 160, 220, 14, BLACK);
+    if (drawSmallButton(190, 215, 30, 25, "+", GRAY) && editDay < 28) editDay++;
+    
+    drawText("Month:", 250, 220, 14, GRAY);
+    if (drawSmallButton(320, 215, 30, 25, "-", GRAY) && editMonth > 1) editMonth--;
+    drawText(to_string(editMonth), 360, 220, 14, BLACK);
+    if (drawSmallButton(390, 215, 30, 25, "+", GRAY) && editMonth < 12) editMonth++;
+    
+    drawText("Nights:", 60, 270, 16, BLACK);
+    if (drawSmallButton(140, 265, 35, 30, "-", GRAY) && editNights > 1) editNights--;
+    drawText(to_string(editNights), 190, 270, 16, BLACK);
+    if (drawSmallButton(230, 265, 35, 30, "+", GRAY) && editNights < 30) editNights++;
+
+    drawText("Guests:", 400, 270, 16, BLACK);
+    if (drawSmallButton(480, 265, 35, 30, "-", GRAY) && editGuests > 1) editGuests--;
+    drawText(to_string(editGuests), 530, 270, 16, BLACK);
+    if (drawSmallButton(570, 265, 35, 30, "+", GRAY) && editGuests < 20) editGuests++;
+    
+    int roomsNeeded = (editGuests + MAX_GUESTS_PER_ROOM - 1) / MAX_GUESTS_PER_ROOM;
+    drawText("Rooms: " + to_string(roomsNeeded), 60, 320, 14, GRAY);
+    
+    int checkoutDay, checkoutMonth, checkoutYear;
+    calculateCheckoutDate(editDay, editMonth, editYear, editNights, checkoutDay, checkoutMonth, checkoutYear);
+    
+    drawText("Checkout: " + formatDate(checkoutDay, checkoutMonth, checkoutYear), 60, 350, 14, GRAY);
+    
+    float newCost = hotel->currentPrice * editNights * roomsNeeded;
+    
+    drawRoundedBox(60, 400, 400, 80, PAKISTAN_GREEN);
+    drawText("New Total Cost", 100, 420, 14, WHITE);
+    drawText("Rs." + to_string((int)newCost), 100, 450, 24, WHITE);
+    
+    float difference = newCost - booking.totalCost;
+    Color diffColor = difference > 0 ? DANGER_RED : SUCCESS_GREEN;
+    drawRoundedBox(500, 400, 400, 80, Fade(diffColor, 0.2f));
+    drawText("Difference", 540, 420, 14, DARKGRAY);
+    string diffText = (difference > 0 ? "+" : "") + to_string((int)difference);
+    drawText("Rs." + diffText, 540, 450, 24, diffColor);
+
+    bool exceedsBudget = user.maxBudget > 0 && 
+                         (user.totalSpent - booking.totalCost + newCost) > user.maxBudget;
+    
+    if (exceedsBudget) {
+        drawRoundedBox(60, 510, 840, 30, DANGER_RED);
+        drawText("New total would exceed budget!", 100, 517, 14, WHITE);
+    }
+    
+    if (drawButton(150, 580, 200, 50, "Update", Color{34, 197, 94, 255})) {
+        if (!exceedsBudget) {
+            user.totalSpent -= booking.totalCost;
+            booking.nights = editNights;
+            booking.guests = editGuests;
+            booking.rooms = roomsNeeded;
+            booking.totalCost = newCost;
+            booking.checkInDate = formatDate(editDay, editMonth, editYear);
+            booking.checkOutDate = formatDate(checkoutDay, checkoutMonth, checkoutYear);
+            user.totalSpent += newCost;
+            
+            saveGame();
+            messageText = "Booking updated successfully!";
+            currentScreen = SCREEN_MESSAGE;
+        } else {
+            messageText = "Cannot update: Exceeds budget!";
+            currentScreen = SCREEN_MESSAGE;
+        }
+    }
+    if (drawButton(674, 580, 200, 50, "Cancel", DANGER_RED)) {
+        currentScreen = SCREEN_BOOKINGS;
+    }
+}
+
+
 void drawMessageScreen(){
     ClearBackground(LIGHT);
     drawRoundedBox(262, 250, 500, 250, WHITE);
@@ -609,6 +1215,149 @@ void drawMessageScreen(){
     if (!currentLine.empty()) drawText(currentLine, 300, yPosition, 18, BLACK);
     if (drawButton(412, 420, 200, 50, "OK", PakGreen)) currentScreen = SCREEN_HOME;
 }
+
+void drawSearchScreen() {
+    ClearBackground(LIGHT);
+    DrawRectangle(0, 0, 1024, 60, WHITE);
+    
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        searchName = "";
+        searchCity = "";
+        searchCategory = "";
+        searchMinPrice = 0;
+        searchMaxPrice = 50000;
+        currentScreen = SCREEN_HOME;
+    }
+    
+    drawText("Search Destinations", 420, 18, 24, BLACK);
+    
+    drawRoundedBox(40, 75, 420, 280, WHITE);
+    drawText("Filters", 70, 95, 18, BLACK);
+    
+    drawText("Name:", 70, 137, 14, GRAY);
+    DrawRectangle(140, 130, 200, 30, Color{245, 245, 245, 255});
+    DrawRectangleLines(140, 130, 200, 30, inputFieldActive == 0 ? PakGreen : GRAY);
+    drawText(searchName, 150, 137, 14, BLACK);
+    Rectangle nameRect = {140, 130, 200, 30};
+    if (CheckCollisionPointRec(GetMousePosition(), nameRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        inputFieldActive = 0;
+        string searchName = "";
+string searchCity = "";
+string searchCategory = "";
+float searchMinPrice = 0;
+float searchMaxPrice = 50000;
+
+    }
+    
+    drawText("City:", 70, 177, 14, GRAY);
+    DrawRectangle(140, 170, 200, 30, Color{245, 245, 245, 255});
+    DrawRectangleLines(140, 170, 200, 30, inputFieldActive == 1 ? PakGreen : GRAY);
+    drawText(searchCity, 150, 177, 14, BLACK);
+    Rectangle cityRect = {140, 170, 200, 30};
+    if (CheckCollisionPointRec(GetMousePosition(), cityRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        inputFieldActive = 1;
+    }
+    
+    drawText("Category:", 70, 217, 14, GRAY);
+    DrawRectangle(140, 210, 200, 30, Color{245, 245, 245, 255});
+    DrawRectangleLines(140, 210, 200, 30, inputFieldActive == 2 ? PakGreen : GRAY);
+    drawText(searchCategory, 150, 217, 14, BLACK);
+    Rectangle catRect = {140, 210, 200, 30};
+    if (CheckCollisionPointRec(GetMousePosition(), catRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        inputFieldActive = 2;
+    }
+    
+    drawText("Price Range:", 70, 260, 14, GRAY);
+    string priceRange = "Rs." + to_string((int)searchMinPrice) + " - Rs." + to_string((int)searchMaxPrice);
+    drawText(priceRange, 70, 285, 14, GRAY);
+    
+    if (drawSmallButton(70, 315, 100, 28, "Budget", GRAY)) {
+        searchMinPrice = 0;
+        searchMaxPrice = 5000;
+    }
+    if (drawSmallButton(180, 315, 100, 28, "Mid", GRAY)) {
+        searchMinPrice = 5000;
+        searchMaxPrice = 15000;
+    }
+    if (drawSmallButton(290, 315, 100, 28, "Luxury", GRAY)) {
+        searchMinPrice = 15000;
+        searchMaxPrice = 50000;
+    }
+    
+    if (inputFieldActive == 0) handleTextInput(searchName, 60);
+    if (inputFieldActive == 1) handleTextInput(searchCity, 30);
+    if (inputFieldActive == 2) handleTextInput(searchCategory, 30);
+    
+    drawRoundedBox(480, 75, 500, 250, WHITE);
+    drawText("Quick Select City:", 510, 95, 14, BLACK);
+    int qx = 510, qy = 125;
+    
+    if (drawSmallButton(qx, qy, 50, 28, "All", searchCity.empty() ? PakGreen : GRAY)) {
+        searchCity = "";
+    }
+    qx += 60;
+    
+    for (int i = 0; i < MAX_CITIES; i++) {
+        if (drawSmallButton(qx, qy, 100, 28, CITIES[i], getCityColor(CITIES[i]))) {
+            searchCity = CITIES[i];
+        }
+        qx += 110;
+        if (qx > 900) { qx = 510; qy += 35; }
+    }
+    
+    drawText("Quick Select Category:", 510, 220, 14, BLACK);
+    qx = 510; qy = 250;
+    for (int i = 0; i < MAX_CATEGORIES; i++) {
+        if (drawSmallButton(qx, qy, 85, 28, CATEGORIES[i], getCategoryColor(CATEGORIES[i]))) {
+            searchCategory = CATEGORIES[i];
+        }
+        qx += 95;
+    }
+    
+    int results[MAX_HOTELS];
+    int resultCount = SearchHotels(results, MAX_HOTELS, searchName, searchCity, searchCategory, searchMinPrice, searchMaxPrice);
+
+    string resultText = "Found: " + to_string(resultCount) + " destinations";
+    drawText(resultText, 40, 375, 16, BLACK);
+    
+    int maxVisible = 4;
+    if (scrollPosition > 0 && drawButton(200, 370, 70, 30, "Up", GRAY)) {
+        scrollPosition--;
+    }
+    if (scrollPosition + maxVisible < resultCount && drawButton(280, 370, 70, 30, "Down", GRAY)) {
+        scrollPosition++;
+    }
+    
+    if (scrollPosition >= resultCount) scrollPosition = 0;
+    
+    int y = 410;
+    for (int idx = scrollPosition; idx < resultCount && idx < scrollPosition + maxVisible; idx++) {
+        int i = results[idx];
+        const Hotel& h = hotels[i];
+        
+        drawRoundedBox(40, y, 940, 75, WHITE);
+        drawRoundedBox(40, y, 8, 75, getCityColor(h.city));
+        
+        drawText(h.name, 65, y + 10, 18, BLACK);
+        string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
+        drawText(info, 65, y + 38, 14, GRAY);
+        
+        Rectangle cardRect = {40, (float)y, 940, 75};
+        if (CheckCollisionPointRec(GetMousePosition(), cardRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            selectedHotelIndex = i;
+            nights = 1;
+            guests = 2;
+            bookingDay = appDay;
+            bookingMonth = appMonth;
+            bookingYear = appYear;
+            currentScreen = SCREEN_DETAIL;
+        }
+        
+        y += 85;
+    }
+}
+
+
 int main(){
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel App"); //Initialize window
     SetTargetFPS(60);
@@ -638,7 +1387,9 @@ int main(){
             case SCREEN_DETAIL:   drawDetailScreen(); break;
             case SCREEN_BOOKINGS: drawBookingsScreen(); break;
             case SCREEN_MESSAGE: drawMessageScreen(); break;
-            default:              drawHomeScreen(); break;
+            case SCREEN_SEARCH:drawSearchScreen();break;
+			case SCREEN_EDIT_BOOKING:drawEditBookingScreen();break;
+            default:drawHomeScreen(); break;
         }
     EndDrawing();
     }
