@@ -120,8 +120,14 @@ int scrollPosition = 0;
 float splashTimer = 0;
 string inputText = "";
 string messageText = "";
+//Search variables
+string searchName = "";
+string searchCity = "";
+string searchCategory = "";
+float searchMinPrice = 0;
+float searchMaxPrice = 50000;
+int inputFieldActive = 0;
 //Booking form variables
-float searchMaxPrice = 50000; 
 int nights = 1;
 int guests = 2;
 int bookingDay = 20;
@@ -131,6 +137,12 @@ int bookingYear = 2025;
 int appDay = 20;
 int appMonth = 12;
 int appYear = 2025;
+//Edit booking variables
+int editNights = 1;
+int editGuests = 2;
+int editDay = 20;
+int editMonth = 12;
+int editYear = 2025;
 
 //helper functions
 float clamp(float value, float minVal, float maxVal) {
@@ -539,10 +551,10 @@ void drawWeatherAlerts(int x, int y) {
             string impact;
             if (w.type == WEATHER_RAIN) {
                 impact = "-15%";
-                drawText(impact, x + 230, alertY + 10, 14, SUCCESS_GREEN);
+                drawText(impact, x + 230, alertY + 10, 14, SuccessGreen);
             } else if (w.type == WEATHER_FESTIVAL) {
                 impact = "+25%";
-                drawText(impact, x + 230, alertY + 10, 14, DANGER_RED);
+                drawText(impact, x + 230, alertY + 10, 14, Red);
             }
 		alertY += 42;
             alertCount++;
@@ -692,7 +704,7 @@ void initializeApp() {
 }
 
 void drawScreenHeader(string title, Screen backScreen) {
-    ClearBackground(BG_LIGHT);
+    ClearBackground(LIGHT);
     DrawRectangle(0, 0, 1024, 60, WHITE);
     if (drawButton(15, 12, 40, 40, "<", GRAY)) {
         currentScreen = backScreen;
@@ -706,7 +718,7 @@ void drawScreenHeader(string title, Screen backScreen) {
 void drawSplashScreen() {
     splashTimer += GetFrameTime();
     
-    ClearBackground(PAKISTAN_GREEN);
+    ClearBackground(PakGreen);
     
     float bounce = sinf(splashTimer * 3) * 10;
     DrawCircle(WINDOW_WIDTH / 2, 220 + (int)bounce, 60, WHITE);
@@ -760,8 +772,12 @@ void drawLoginScreen(){
     if (drawSmallButton(560, 400, 40, 35, "-", GRAY) && user.maxBudget > 10000) user.maxBudget -= 5000;
     if (drawSmallButton(610, 400, 40, 35, "+", GRAY) && user.maxBudget < 500000) user.maxBudget += 5000;
     
-    // Travel Style Toggle
+    //Travel Style Toggle
     drawText("Travel Mode:", 250, 460, 18, DARKGRAY);
+    
+    Color budgetBtnColor = user.budgetMode ? SuccessGreen : GRAY;
+    Color luxuryBtnColor = !user.budgetMode ? Color{168, 85, 247, 255} : GRAY;
+    
     if (drawButton(250, 495, 140, 45, "Budget", budgetBtnColor)) {
         user.budgetMode = true;
         updateHotelPrices();
@@ -771,7 +787,8 @@ void drawLoginScreen(){
         updateHotelPrices();
     }
 
-    if (drawButton(380, 580, 260, 55, "Start Journey", PakGreen)) {
+    //Submit button
+    if (drawButton(380, 570, 260, 55, "Start Journey", PakGreen)) {
         if (!inputText.empty()) {
             user.name = inputText;
             saveGame();
@@ -780,7 +797,7 @@ void drawLoginScreen(){
     }
 
     // Submit button - requires a name to proceed
-    if (drawButton(380, 570, 260, 55, "Start Journey", PAKISTAN_GREEN)) {
+    if (drawButton(380, 570, 260, 55, "Start Journey", PakGreen)) {
         if (!inputText.empty()) {
             user.name = inputText;
             currentScreen = SCREEN_HOME;
@@ -789,7 +806,7 @@ void drawLoginScreen(){
 }
 
 void drawHomeScreen() {
-    ClearBackground(BG_LIGHT);
+    ClearBackground(LIGHT);
     DrawRectangle(0, 0, 1024, 80, WHITE); //Navbar
     drawText("MUSAFIR", 420, 10, 40, PakGreen); 
     //Personalized greeting and budget status
@@ -798,7 +815,7 @@ void drawHomeScreen() {
     float remaining = user.maxBudget - user.totalSpent;
     string stats = "Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent) + " | Remaining: Rs." + to_string((int)remaining); 
     // Turn the text red if the user is over budget
-    drawText(stats, 40, 130, 14, remaining < 0 ? DANGER_RED : GRAY);
+    drawText(stats, 40, 130, 14, remaining < 0 ? Red : GRAY);
     //Main navigation buttons
     if (drawButton(40, 180, 200, 50, "Explore", Color{59, 130, 246, 255})) {
         scrollPosition = 0;
@@ -838,106 +855,92 @@ void drawHomeScreen() {
     }
 }
 
-void drawExploreScreen(){
+void drawExploreScreen() {
     ClearBackground(LIGHT);
     DrawRectangle(0, 0, 1024, 60, WHITE);
-    if (drawButton(15, 12, 40, 40, "<", GRAY)) currentScreen = SCREEN_HOME; //Back button
+    
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        currentScreen = SCREEN_HOME;
+    }
+    
     drawText("Explore Pakistan", (1024 - measureText("Explore Pakistan", 24)) / 2, 18, 24, BLACK);
-    //Loop through hotels with a simple scroll offset (scrollPosition)
-    // City filter
-int filterX = 40;
-bool allSelected = searchCity.empty();
-if (drawSmallButton(filterX, 70, 60, 30, "All", allSelected ? PakGreen : GRAY)) {
-    searchCity = "";
-}
-filterX += 70;
-
-for (int i = 0; i < MAX_CITIES; i++) {
-    bool isSelected = (searchCity == CITIES[i]);
-    Color btnColor = isSelected ? getCityColor(CITIES[i]) : GRAY;
-    if (drawSmallButton(filterX, 70, 110, 30, CITIES[i], btnColor)) {
-        if (isSelected) searchCity = "";
-        else searchCity = CITIES[i];
+    
+    //City filter buttons
+    int filterX = 40;
+    bool allSelected = searchCity.empty();
+    if (drawSmallButton(filterX, 70, 60, 30, "All", allSelected ? PakGreen : GRAY)) {
+        searchCity = "";
     }
-    filterX += 118;
-}
+    filterX += 70;
 
-// Get filtered hotels
-int results[MAX_HOTELS];
-int resultCount = SearchHotels(results, MAX_HOTELS, "", searchCity, "", 0, 999999);
-
-int y = 115;
-int maxVisible = 6;
-
-for (int idx = scrollPosition; idx < resultCount && idx < scrollPosition + maxVisible; idx++) {
-    int i = results[idx];
-    const Hotel& h = hotels[i];
-    
-    drawRoundedBox(40, y, 940, 85, WHITE);
-    drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
-    
-    drawText(h.name, 65, y + 12, 18, BLACK);
-    string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
-    drawText(info, 65, y + 42, 14, GRAY);
-    
-    if (h.hasDeal) {
-        string deal = to_string((int)h.dealPercent) + "% OFF!";
-        drawRoundedBox(800, y + 10, 80, 25, Red);
-        drawText(deal, 815, y + 15, 13, WHITE);
+    for (int i = 0; i < MAX_CITIES; i++) {
+        bool isSelected = (searchCity == CITIES[i]);
+        Color btnColor = isSelected ? getCityColor(CITIES[i]) : GRAY;
+        if (drawSmallButton(filterX, 70, 110, 30, CITIES[i], btnColor)) {
+            if (isSelected) {
+                searchCity = "";
+            } else {
+                searchCity = CITIES[i];
+            }
+        }
+        filterX += 118;
     }
-    
-    string rating = to_string(h.rating).substr(0, 3);
-    drawText(rating, 900, y + 40, 18, Color{234, 179, 8, 255});
-    
-    if (CheckCollisionPointRec(GetMousePosition(), {40, (float)y, 940, 85}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)){
-        selectedHotelIndex = i;
-        nights = 1;
-        guests = 2;
-        bookingDay = appDay;
-        bookingMonth = appMonth;
-        bookingYear = appYear;
-        currentScreen = SCREEN_DETAIL;
-    }
-    
-    y += 95;
-}
 
-// Scroll controls
-if (scrollPosition > 0 && drawButton(450, 720, 70, 35, "Up", GRAY)) scrollPosition--;
-if (scrollPosition + maxVisible < resultCount && drawButton(530, 720, 70, 35, "Down", GRAY)) scrollPosition++;
+    //Get filtered hotels
+    int results[MAX_HOTELS];
+    int resultCount = SearchHotels(results, MAX_HOTELS, "", searchCity, "", 0, 999999);
 
-int showing = resultCount - scrollPosition;
-if (showing > maxVisible) showing = maxVisible;
-string countText = "Showing " + to_string(showing) + " of " + to_string(resultCount);
-drawText(countText, 40, 725, 14, GRAY);
-        //Card UI for each hotel
+    int y = 115;
+    int maxVisible = 6;
+
+    for (int idx = scrollPosition; idx < resultCount && idx < scrollPosition + maxVisible; idx++) {
+        int i = results[idx];
+        const Hotel& h = hotels[i];
+        
         drawRoundedBox(40, y, 940, 85, WHITE);
         drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
-        drawText(h.name, 65, y + 12, 18, BLACK);
         
+        drawText(h.name, 65, y + 12, 18, BLACK);
         string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
         drawText(info, 65, y + 42, 14, GRAY);
         
         if (h.hasDeal) {
+            string deal = to_string((int)h.dealPercent) + "% OFF!";
             drawRoundedBox(800, y + 10, 80, 25, Red);
-            drawText(to_string((int)h.dealPercent) + "% OFF!", 815, y + 15, 13, WHITE);
+            drawText(deal, 815, y + 15, 13, WHITE);
         }
         
-        drawText(to_string(h.rating).substr(0, 3), 900, y + 40, 18, Color{234, 179, 8, 255});
-        //If user clicks the card, go to the Detail Screen
-        if (CheckCollisionPointRec(GetMousePosition(), {40, (float)y, 940, 85}) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)){
+        string rating = to_string(h.rating).substr(0, 3);
+        drawText(rating, 900, y + 40, 18, Color{234, 179, 8, 255});
+        
+        Rectangle cardRect = {40, (float)y, 940, 85};
+        if (CheckCollisionPointRec(GetMousePosition(), cardRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             selectedHotelIndex = i;
+            nights = 1;
+            guests = 2;
+            bookingDay = appDay;
+            bookingMonth = appMonth;
+            bookingYear = appYear;
             currentScreen = SCREEN_DETAIL;
         }
+        
         y += 95;
-        displayedCount++;
     }
-    //Scroll controls (Up/Down)
-    if (scrollPosition > 0 && drawButton(450, 720, 70, 35, "Up", GRAY)) scrollPosition--;
-    if (scrollPosition + maxVisible < hotelCount && drawButton(530, 720, 70, 35, "Down", GRAY)) scrollPosition++;
-    
-    drawText("Showing " + to_string(displayedCount) + " of " + to_string(hotelCount) + " hotels", 40, 725, 14, GRAY);
+
+    //Scroll controls
+    if (scrollPosition > 0 && drawButton(450, 720, 70, 35, "Up", GRAY)) {
+        scrollPosition--;
+    }
+    if (scrollPosition + maxVisible < resultCount && drawButton(530, 720, 70, 35, "Down", GRAY)) {
+        scrollPosition++;
+    }
+
+    int showing = resultCount - scrollPosition;
+    if (showing > maxVisible) showing = maxVisible;
+    string countText = "Showing " + to_string(showing) + " of " + to_string(resultCount);
+    drawText(countText, 40, 725, 14, GRAY);
 }
+
 void drawDetailScreen(){
     // Safety check: if no hotel selected, kick back to home
     if (selectedHotelIndex < 0 || selectedHotelIndex >= hotelCount) {
@@ -1008,7 +1011,7 @@ void drawDetailScreen(){
     //Budget warning
     bool exceedsBudget = user.maxBudget > 0 && (user.totalSpent + total) > user.maxBudget;
     if (exceedsBudget){
-        drawRoundedBox(550, 500, 280, 30, DANGER_RED);
+        drawRoundedBox(550, 500, 280, 30, Red);
         drawText("Exceeds Your Budget!", 600, 507, 14, WHITE);
     }
     //Book button
@@ -1084,7 +1087,7 @@ void drawBookingsScreen() {
         }
         
         //Cancel button
-        if (drawButton(810, y + 70, 80, 32, "Cancel", DANGER_RED)) {
+        if (drawButton(810, y + 70, 80, 32, "Cancel", Red)) {
             if (cancelBooking(i)) {
                 messageText = "Booking cancelled successfully!";
                 currentScreen = SCREEN_MESSAGE;
@@ -1124,7 +1127,7 @@ void drawEditBookingScreen() {
     
     drawText("Check-in Date:", 60, 180, 16, BLACK);
     string dateDisplay = formatDate(editDay, editMonth, editYear);
-    drawText(dateDisplay, 400, 180, 16, PAKISTAN_GREEN);
+    drawText(dateDisplay, 400, 180, 16, PakGreen);
     
     drawText("Day:", 60, 220, 14, GRAY);
     if (drawSmallButton(120, 215, 30, 25, "-", GRAY) && editDay > 1) editDay--;
@@ -1156,12 +1159,12 @@ void drawEditBookingScreen() {
     
     float newCost = hotel->currentPrice * editNights * roomsNeeded;
     
-    drawRoundedBox(60, 400, 400, 80, PAKISTAN_GREEN);
+    drawRoundedBox(60, 400, 400, 80, PakGreen);
     drawText("New Total Cost", 100, 420, 14, WHITE);
     drawText("Rs." + to_string((int)newCost), 100, 450, 24, WHITE);
     
     float difference = newCost - booking.totalCost;
-    Color diffColor = difference > 0 ? DANGER_RED : SUCCESS_GREEN;
+    Color diffColor = difference > 0 ? Red : SuccessGreen;
     drawRoundedBox(500, 400, 400, 80, Fade(diffColor, 0.2f));
     drawText("Difference", 540, 420, 14, DARKGRAY);
     string diffText = (difference > 0 ? "+" : "") + to_string((int)difference);
@@ -1171,7 +1174,7 @@ void drawEditBookingScreen() {
                          (user.totalSpent - booking.totalCost + newCost) > user.maxBudget;
     
     if (exceedsBudget) {
-        drawRoundedBox(60, 510, 840, 30, DANGER_RED);
+        drawRoundedBox(60, 510, 840, 30, Red);
         drawText("New total would exceed budget!", 100, 517, 14, WHITE);
     }
     
@@ -1194,7 +1197,7 @@ void drawEditBookingScreen() {
             currentScreen = SCREEN_MESSAGE;
         }
     }
-    if (drawButton(674, 580, 200, 50, "Cancel", DANGER_RED)) {
+    if (drawButton(674, 580, 200, 50, "Cancel", Red)) {
         currentScreen = SCREEN_BOOKINGS;
     }
 }
@@ -1221,11 +1224,6 @@ void drawSearchScreen() {
     DrawRectangle(0, 0, 1024, 60, WHITE);
     
     if (drawButton(15, 12, 40, 40, "<", GRAY)) {
-        searchName = "";
-        searchCity = "";
-        searchCategory = "";
-        searchMinPrice = 0;
-        searchMaxPrice = 50000;
         currentScreen = SCREEN_HOME;
     }
     
