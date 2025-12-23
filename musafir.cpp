@@ -83,6 +83,20 @@ struct UserProfile {
     string preferredCities[MAX_PREFERRED_CITIES];
     int preferredCityCount;
 };
+//Budget planner settings
+struct BudgetPlanner {
+    bool enabled;
+    float totalBudget;
+    int plannedTrips;
+    float spentInPlan;
+    int tripsInPlan;
+};
+// Notes for planner
+const int MAX_NOTES = 5;
+string plannerNotes[MAX_NOTES];
+int noteCount = 0;
+string newNoteInput = "";
+
 //app screens
 enum Screen {
     SCREEN_SPLASH,
@@ -93,7 +107,9 @@ enum Screen {
     SCREEN_BOOKINGS,
     SCREEN_MESSAGE,
     SCREEN_SEARCH,
-    SCREEN_EDIT_BOOKING
+    SCREEN_EDIT_BOOKING,
+    SCREEN_SETTINGS,
+	SCREEN_PLANNER
 };
 
 // Global arrays
@@ -103,11 +119,11 @@ int hotelCount = 0;
 Weather weatherData[MAX_WEATHER];
 int weatherCount = 0;
 
-
 Booking bookings[MAX_BOOKINGS];
 int bookingCount = 0;
 Font appFont;
 UserProfile user;
+BudgetPlanner planner;
 
 Screen currentScreen = SCREEN_SPLASH;
 int selectedHotelIndex = -1;
@@ -277,7 +293,53 @@ string getWeatherName(int weatherType) {
     if (weatherType == WEATHER_FESTIVAL) return "Festival";
     return "Normal";
 }
+//Preferred cities
+bool isCityPreferred(string city) {
+    for (int i = 0; i < user.preferredCityCount; i++) {
+        if (user.preferredCities[i] == city) return true;
+    }
+    return false;
+}
+//select city
+void togglePreferredCity(string city){
+    int foundIndex = -1;
+    for (int i = 0; i < user.preferredCityCount; i++){
+        if (user.preferredCities[i] == city){
+            foundIndex = i;
+            break;
+           }
+    }
 
+    if (foundIndex != -1){
+        // Remove city
+        for (int i = foundIndex; i < user.preferredCityCount - 1; i++){
+            user.preferredCities[i] = user.preferredCities[i + 1];
+        }
+        user.preferredCityCount--;
+    } else{
+        // Add city if room
+        if (user.preferredCityCount < MAX_PREFERRED_CITIES){
+            user.preferredCities[user.preferredCityCount] = city;
+            user.preferredCityCount++;
+        }
+    }
+}
+
+Color getLevelColor(int level){
+    if (level == 0) return Color{205, 127, 50, 255};  // Bronze
+    if (level == 1) return Color{192, 192, 192, 255}; // Silver
+    return Color{255, 215, 0, 255};  // Gold
+}
+
+string getLevelName(int level){
+    if (level == 0) return "Bronze";
+    if (level == 1) return "Silver";
+    return "Gold";
+}
+float getRemainingPlannerBudget() { //planner function
+    if (!planner.enabled) return 999999;
+    return planner.totalBudget - planner.spentInPlan;
+}
 
 //helper functions for drawing gui elements
 void drawText(string text, int x, int y, int size, Color color){
@@ -488,6 +550,11 @@ bool createBooking(int hotelIndex, int numNights, int numGuests) {
     user.totalBookings++;
     user.totalSpent += totalCost;
     user.placesVisited++;
+    //Track in planner
+    if (planner.enabled){
+        planner.spentInPlan += totalCost;
+        planner.tripsInPlan++;
+	}
     saveGame();
     return true;
 }
@@ -590,6 +657,19 @@ void saveGame() {
     file << user.maxBudget << "\n";
     file << (user.budgetMode ? 1 : 0) << "\n";
     file << user.level << "\n";
+	//Save planner
+    file << (planner.enabled ? 1 : 0) << "\n";
+    file << planner.totalBudget << "\n";
+    file << planner.plannedTrips << "\n";
+    file << planner.spentInPlan << "\n";
+    file << planner.tripsInPlan << "\n";
+    
+    // Save notes
+    file << noteCount << "\n";
+    for (int i = 0; i < noteCount; i++) {
+        file << plannerNotes[i] << "\n";
+    }
+
     
     file << visitedHotelCount << "\n";
     for (int i = 0; i < visitedHotelCount; i++) {
@@ -633,7 +713,22 @@ bool loadGame() {
     file >> budgetMode;
     user.budgetMode = (budgetMode == 1);
     file >> user.level;
-    
+	//Load planner
+    int plannerEnabled;
+    file >> plannerEnabled;
+    planner.enabled = (plannerEnabled == 1);
+    file >> planner.totalBudget;
+    file >> planner.plannedTrips;
+    file >> planner.spentInPlan;
+    file >> planner.tripsInPlan;
+    //Load notes
+    file >> noteCount;
+    file.ignore();
+    if (noteCount < 0) noteCount = 0;
+    if (noteCount > MAX_NOTES) noteCount = MAX_NOTES;
+    for (int i = 0; i < noteCount; i++) {
+        getline(file, plannerNotes[i]);
+    } 
     file >> visitedHotelCount;
     file.ignore();
     if (visitedHotelCount < 0) visitedHotelCount = 0;
@@ -689,7 +784,18 @@ void initializeApp() {
     user.budgetMode = true;
     user.preferredCityCount = 0;
     for (int i = 0; i < MAX_PREFERRED_CITIES; i++) user.preferredCities[i] = "";
+    //Initialize planner
+    planner.enabled = false;
+    planner.totalBudget = 80000;
+    planner.plannedTrips = 5;
+    planner.spentInPlan = 0;
+    planner.tripsInPlan = 0;
     
+    //Clear notes
+    for (int i = 0; i < MAX_NOTES; i++) plannerNotes[i] = "";
+    noteCount = 0;
+    newNoteInput = "";
+
     visitedHotelCount = 0;
     for (int i = 0; i < MAX_VISITED_HOTELS; i++) {
         visitedHotelNames[i] = "";
@@ -816,6 +922,18 @@ void drawHomeScreen() {
     string stats = "Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent) + " | Remaining: Rs." + to_string((int)remaining); 
     // Turn the text red if the user is over budget
     drawText(stats, 40, 130, 14, remaining < 0 ? Red : GRAY);
+	// Planner info if enabled
+    if (planner.enabled) {
+        float planRemaining = getRemainingPlannerBudget();
+        string planText;
+        if (planRemaining < 0) {
+            planText = "Planner: Budget Plan Exceeded!";
+        } else {
+            planText = "Planner: Rs." + to_string((int)planRemaining) + " left";
+        }
+        Color planColor = planRemaining < 0 ? Red : GRAY;
+        drawText(planText, 40, 155, 14, planColor);
+    }
     //Main navigation buttons
     if (drawButton(40, 180, 200, 50, "Explore", Color{59, 130, 246, 255})) {
         scrollPosition = 0;
@@ -828,6 +946,14 @@ void drawHomeScreen() {
     scrollPosition = 0;
     currentScreen = SCREEN_SEARCH;
     }
+	if (drawButton(700, 180, 140, 50, "Planner", Color{59, 130, 246, 255})){//planner
+        currentScreen = SCREEN_PLANNER;
+    }
+    //Settings button at bottom
+    if (drawButton(40, 710, 130, 40, "Settings", GRAY)){
+        currentScreen = SCREEN_SETTINGS;
+    }
+
     // Recommendation List (Shows first 3 active hotels)
     drawText("Recommended For You", 40, 260, 18, BLACK);
     int y = 295;
@@ -1354,8 +1480,203 @@ float searchMaxPrice = 50000;
         y += 85;
     }
 }
+// Planner screen
+void drawPlannerScreen() {
+    ClearBackground(LIGHT);
+    DrawRectangle(0, 0, 1024, 60, WHITE);
 
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        saveGame();
+        currentScreen = SCREEN_HOME;
+    }
 
+    drawText("Travel Planner", 430, 18, 24, BLACK);
+
+    //Planner settings panel
+    drawRoundedBox(40, 80, 460, 400, WHITE);
+    drawText("Budget Planner", 70, 110, 22, PakGreen);
+
+    //Toggle button
+    string toggleText = planner.enabled ? "Planner ON" : "Planner OFF";
+    Color toggleColor = planner.enabled ? SuccessGreen : GRAY;
+    if (drawButton(70, 155, 200, 45, toggleText, toggleColor)) {
+        if (!planner.enabled) {
+            planner.spentInPlan = 0;
+            planner.tripsInPlan = 0;
+        }
+        planner.enabled = !planner.enabled;
+    }
+
+    //Reset button
+    if (drawButton(300, 155, 150, 45, "Reset Plan", Red)) {
+        planner.spentInPlan = 0;
+        planner.tripsInPlan = 0;
+    }
+
+    //Total budget setting
+    string budgetStr = "Total Budget: Rs." + to_string((int)planner.totalBudget);
+    drawText(budgetStr, 70, 220, 18, BLACK);
+    if (drawSmallButton(330, 215, 40, 35, "-", GRAY) && planner.totalBudget > 10000) {
+        planner.totalBudget -= 5000;
+    }
+    if (drawSmallButton(380, 215, 40, 35, "+", GRAY) && planner.totalBudget < 500000) {
+        planner.totalBudget += 5000;
+    }
+
+    //Planned trips setting
+    string tripsStr = "Planned Trips: " + to_string(planner.plannedTrips);
+    drawText(tripsStr, 70, 275, 18, BLACK);
+    if (drawSmallButton(330, 270, 40, 35, "-", GRAY) && planner.plannedTrips > 1) {
+        planner.plannedTrips--;
+    }
+    if (drawSmallButton(380, 270, 40, 35, "+", GRAY) && planner.plannedTrips < 20) {
+        planner.plannedTrips++;
+    }
+
+    //Show stats when planner is ON
+    if (planner.enabled) {
+        string spentStr = "Spent in Plan: Rs." + to_string((int)planner.spentInPlan);
+        drawText(spentStr, 70, 330, 16, GRAY);
+
+        float remaining = getRemainingPlannerBudget();
+        string remainStr;
+        Color remainColor;
+        if (remaining < 0) {
+            remainStr = "Budget Plan Exceeded!";
+            remainColor = Red;
+        } else {
+            remainStr = "Remaining: Rs." + to_string((int)remaining);
+            remainColor = SuccessGreen;
+        }
+        drawText(remainStr, 70, 360, 18, remainColor);
+
+        //Progress bar
+        string progressStr = "Trips Planned: " + to_string(planner.tripsInPlan) + " / " + to_string(planner.plannedTrips);
+        drawText(progressStr, 70, 400, 16, GRAY);
+
+        DrawRectangle(70, 430, 400, 16, Color{230, 230, 230, 255});
+        float tripProgress = clamp((float)planner.tripsInPlan / (float)planner.plannedTrips, 0, 1);
+        DrawRectangle(70, 430, (int)(400 * tripProgress), 16, PakGreen);
+    }
+
+    //Notes section
+    drawRoundedBox(520, 80, 470, 650, WHITE);
+    drawText("Travel Notes", 550, 110, 22, PakGreen);
+
+    int noteY = 160;
+    for (int i = 0; i < noteCount && i < MAX_NOTES; i++) {
+        drawRoundedBox(550, noteY, 400, 65, Color{245, 245, 245, 255});
+        drawText(plannerNotes[i], 565, noteY + 22, 14, BLACK);
+
+        if (drawSmallButton(920, noteY + 18, 30, 30, "X", Red)) {
+            for (int j = i; j < noteCount - 1; j++) {
+                plannerNotes[j] = plannerNotes[j + 1];
+            }
+            plannerNotes[noteCount - 1] = "";
+            noteCount--;
+        }
+        noteY += 80;
+    }
+
+    //Add new note
+    if (noteCount < MAX_NOTES) {
+        drawText("Add Note:", 550, noteY + 30, 16, GRAY);
+        DrawRectangle(660, noteY + 25, 250, 35, Color{245, 245, 245, 255});
+        DrawRectangleLines(660, noteY + 25, 250, 35, PakGreen);
+        drawText(newNoteInput, 670, noteY + 33, 14, BLACK);
+
+        handleTextInput(newNoteInput, 100);
+
+        if (drawSmallButton(660, noteY + 75, 80, 35, "Add", SuccessGreen)) {
+            if (!newNoteInput.empty() && noteCount < MAX_NOTES) {
+                plannerNotes[noteCount] = newNoteInput;
+                noteCount++;
+                newNoteInput = "";
+            }
+        }
+    } else {
+        drawText("Max 5 notes reached", 550, noteY + 30, 14, GRAY);
+    }
+}
+
+// Settings screen
+void drawSettingsScreen() {
+    ClearBackground(LIGHT);
+    DrawRectangle(0, 0, 1024, 60, WHITE);
+
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        saveGame();
+        currentScreen = SCREEN_HOME;
+    }
+
+    drawText("Settings", 450, 18, 24, BLACK);
+
+    // Main settings panel
+    drawRoundedBox(200, 85, 624, 400, WHITE);
+
+    // User info
+    drawText("Welcome, " + user.name, 240, 120, 20, BLACK);
+    drawText("Level: " + getLevelName(user.level), 240, 150, 16, GRAY);
+
+    // Budget setting
+    drawText("Trip Budget Cap:", 240, 190, 16, BLACK);
+    string budgetStr = "Rs. " + to_string((int)user.maxBudget);
+    drawText(budgetStr, 450, 190, 18, PakGreen);
+
+    if (drawButton(240, 220, 150, 40, "Increase", GRAY)){
+        user.maxBudget += 5000;
+    }
+    if (drawButton(410, 220, 150, 40, "Decrease", GRAY) && user.maxBudget > 5000){
+        user.maxBudget -= 5000;
+    }
+
+    // Travel mode
+    drawText("Travel Mode:", 240, 285, 16, BLACK);
+
+    Color budgetColor = user.budgetMode ? SuccessGreen : GRAY;
+    Color luxuryColor = !user.budgetMode ? Color{168, 85, 247, 255} : GRAY;
+
+    if (drawButton(240, 315, 150, 40, "Budget", budgetColor)){
+        user.budgetMode = true;
+        updateHotelPrices();
+    }
+    if (drawButton(410, 315, 150, 40, "Luxury", luxuryColor)){
+        user.budgetMode = false;
+        updateHotelPrices();
+    }
+
+    //Preferred cities
+    drawText("Preferred Cities (max 3):", 240, 375, 16, BLACK);
+    int px = 240;
+    int py = 405;
+    for (int i = 0; i < MAX_CITIES; i++){
+        bool selected = isCityPreferred(CITIES[i]);
+        Color cityBtnColor = selected ? getCityColor(CITIES[i]) : GRAY;
+        if (drawSmallButton(px, py, 100, 30, CITIES[i], cityBtnColor)){
+            togglePreferredCity(CITIES[i]);
+        }
+        px += 110;
+        if (px > 700) { px = 240; py += 38; }
+    }
+
+    //Reset button
+    if (drawButton(240, 520, 150, 45, "Reset All", Red)){
+        string savedName = user.name;
+        float savedBudget = user.maxBudget;
+        initializeApp();
+        user.name = savedName;
+        user.maxBudget = savedBudget;
+        saveGame();
+        messageText = "All data has been reset!\n(Name kept)";
+        currentScreen = SCREEN_MESSAGE;
+    }
+
+    // Save & Quit button
+    if (drawButton(410, 520, 150, 45, "Save & Quit", SuccessGreen)){
+        saveGame();
+        CloseWindow();
+      }
+}
 int main(){
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel App"); //Initialize window
     SetTargetFPS(60);
@@ -1387,6 +1708,8 @@ int main(){
             case SCREEN_MESSAGE: drawMessageScreen(); break;
             case SCREEN_SEARCH:drawSearchScreen();break;
 			case SCREEN_EDIT_BOOKING:drawEditBookingScreen();break;
+			case SCREEN_SETTINGS: drawSettingsScreen(); break;
+			case SCREEN_PLANNER:  drawPlannerScreen(); break;
             default:drawHomeScreen(); break;
         }
     EndDrawing();
