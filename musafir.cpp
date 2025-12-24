@@ -115,8 +115,10 @@ enum Screen {
     SCREEN_SEARCH,
     SCREEN_EDIT_BOOKING,
     SCREEN_SETTINGS,
-	SCREEN_PLANNER
+	SCREEN_PLANNER,
+    SCREEN_SUMMARY
 };
+
 
 // Global arrays
 Hotel hotels[MAX_HOTELS];
@@ -1067,6 +1069,11 @@ void drawHomeScreen() {
         currentScreen = SCREEN_SETTINGS;
     }
 
+	if (drawButton(850, 710, 150, 40, "Summary", PAKISTAN_GREEN)) {
+        currentScreen = SCREEN_SUMMARY;
+    }
+
+
     // Recommendation List (Shows first 3 active hotels)
     drawText("Recommended For You", 40, 260, 18, BLACK);
     int y = 295;
@@ -1790,6 +1797,61 @@ void drawSettingsScreen() {
         CloseWindow();
       }
 }
+
+// ==================== SCREEN: SUMMARY ====================
+void drawSummaryScreen() {
+    ClearBackground(BG_LIGHT);
+    DrawRectangle(0, 0, 1024, 60, BG_WHITE);
+    
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        currentScreen = SCREEN_HOME;
+    }
+    drawText("Session Summary", 420, 18, 24, BLACK);
+
+    // Summary card
+    drawRoundedBox(300, 120, 424, 520, BG_WHITE);
+
+    // Stats
+    drawText("Traveler: " + user.name, 340, 165, 18, BLACK);
+    drawText("Destinations Planned: " + to_string(user.placesVisited), 340, 205, 18, BLACK);
+    drawText("Destinations Travelled: " + to_string(destinationsTravelled), 340, 245, 18, BLACK);
+    drawText("Total Spent: Rs." + to_string((int)user.totalSpent), 340, 285, 18, BLACK);
+
+    // Level with color
+    drawText("Level: " + getLevelName(user.level), 340, 325, 18, getLevelColor(user.level));
+    drawText("Score: " + to_string((int)user.travelerScore), 340, 365, 18, BLACK);
+
+    // Budget info
+    float remaining = user.maxBudget - user.totalSpent;
+    Color remColor = remaining < 0 ? DANGER_RED : SUCCESS_GREEN;
+    drawText("Budget: Rs." + to_string((int)user.maxBudget), 340, 405, 16, GRAY);
+    drawText("Remaining: Rs." + to_string((int)remaining), 340, 430, 16, remColor);
+
+    // Planner info
+    if (planner.enabled) {
+        float planRemaining = getRemainingPlannerBudget();
+        string planStr;
+        if (planRemaining < 0) {
+            planStr = "Planner: Budget Exceeded!";
+        } else {
+            planStr = "Planner: Rs." + to_string((int)planRemaining) + " left";
+        }
+        drawText(planStr, 340, 470, 16, planRemaining < 0 ? DANGER_RED : GRAY);
+    }
+
+    // Achievements
+    string badgesStr = "Badges: ";
+    bool anyBadge = false;
+    if (badges.frequentTraveler) { badgesStr += "Frequent Traveler "; anyBadge = true; }
+    if (badges.budgetMaster) { badgesStr += "Budget Master "; anyBadge = true; }
+    if (badges.explorer) { badgesStr += "Explorer "; anyBadge = true; }
+    if (!anyBadge) badgesStr += "None";
+    drawText(badgesStr, 340, 510, 14, GRAY);
+
+    drawText("Good job exploring Pakistan!", 340, 560, 18, PAKISTAN_GREEN);
+}
+
+
 int main(){
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel App"); //Initialize window
     SetTargetFPS(60);
@@ -1823,6 +1885,7 @@ int main(){
 			case SCREEN_EDIT_BOOKING:drawEditBookingScreen();break;
 			case SCREEN_SETTINGS: drawSettingsScreen(); break;
 			case SCREEN_PLANNER:  drawPlannerScreen(); break;
+			case SCREEN_SUMMARY:  drawSummaryScreen(); break;
             default:drawHomeScreen(); break;
         }
     EndDrawing();
