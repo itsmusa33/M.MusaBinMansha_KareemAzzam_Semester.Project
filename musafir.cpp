@@ -166,6 +166,11 @@ int appDay = 20;
 int appMonth = 12;
 int appYear = 2025;
 float dateTimer = 0;
+// Saved recommendations (to prevent flickering)
+int savedHotels[3] = {-1, -1, -1};
+int savedHotelCount = 0;
+bool lastWasBudget = true;
+int lastPrefCities = -1;
 //Edit booking variables
 int editNights = 1;
 int editGuests = 2;
@@ -1125,31 +1130,98 @@ void drawHomeScreen() {
     }
 
 
-    // Recommendation List (Shows first 3 active hotels)
-    drawText("Recommended For You", 40, 260, 18, BLACK);
-    int y = 295;
-    int count = 0;
-    for (int i = 0; i < hotelCount && count < 3; i++) {
-        const Hotel& h = hotels[i];
-        if (!h.isActive) continue;
-        
-        drawRoundedBox(40, y, 940, 80, WHITE);
-        drawRoundedBox(40, y, 8, 80, getCityColor(h.city)); //Color strip based on city
-        drawText(h.name, 65, y + 12, 18, BLACK);
-        
-        string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
-        drawText(info, 65, y + 42, 14, GRAY);
-        
-        //Show a red badge if there's a discount
-        if (h.hasDeal) {
-            drawRoundedBox(840, y + 10, 80, 25, Red);
-            drawText(to_string((int)h.dealPercent) + "% OFF!", 855, y + 15, 13, WHITE);
+// Recommended hotels
+    drawText("Recommended For You", 40, 290, 18, BLACK);
+
+    // Check if we need to recalculate
+    bool settingsChanged = (lastWasBudget != user.budgetMode) || (lastPrefCities != user.preferredCityCount);
+
+    if (settingsChanged) {
+        lastWasBudget = user.budgetMode;
+        lastPrefCities = user.preferredCityCount;
+        savedHotelCount = 0;
+        savedHotels[0] = savedHotels[1] = savedHotels[2] = -1;
+
+        if (user.preferredCityCount == 1) {
+            // One city selected - show up to 3 hotels from that city
+            for (int i = 0; i < hotelCount && savedHotelCount < 3; i++) {
+                if (hotels[i].isActive && hotels[i].city == user.preferredCities[0]) {
+                    savedHotels[savedHotelCount++] = i;
+                }
+            }
+        } else {
+            // Use preferred cities or default to first 3 cities
+            string cities[3];
+            int cityCount = 0;
+            if (user.preferredCityCount > 1) {
+                for (int i = 0; i < user.preferredCityCount && cityCount < 3; i++) {
+                    cities[cityCount++] = user.preferredCities[i];
+                }
+            } else {
+                cities[0] = CITIES[0]; cities[1] = CITIES[1]; cities[2] = CITIES[2];
+                cityCount = 3;
+            }
+            
+            // Get best hotel from each city
+            for (int c = 0; c < cityCount; c++) {
+                int best = -1;
+                for (int i = 0; i < hotelCount; i++) {
+                    if (!hotels[i].isActive || hotels[i].city != cities[c]) continue;
+                    if (best == -1) best = i;
+                    else if (user.budgetMode && hotels[i].currentPrice < hotels[best].currentPrice) best = i;
+                    else if (!user.budgetMode && hotels[i].currentPrice > hotels[best].currentPrice) best = i;
+                }
+                if (best != -1) savedHotels[savedHotelCount++] = best;
+            }
         }
-        
-        drawText(to_string(h.rating).substr(0, 3), 900, y + 40, 18, Color{234, 179, 8, 255}); // Star rating
-        y += 90;
-        count++;
     }
+
+    // Draw saved hotels
+    int y = 325;
+    for (int i = 0; i < savedHotelCount; i++) {
+        if (savedHotels[i] != -1) {
+            const Hotel& h = hotels[savedHotels[i]];
+            
+            drawRoundedBox(40, y, 940, 85, BG_WHITE);
+            drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
+            
+            drawText(h.name, 65, y + 12, 18, BLACK);
+            
+            // Visited/Booked label
+            int nameWidth = measureText(h.name, 18);
+            if (isHotelVisited(h.name, h.city)) {
+                drawRoundedBox(75 + nameWidth, y + 10, 60, 22, SUCCESS_GREEN);
+                drawText("Visited", 82 + nameWidth, y + 13, 12, WHITE);
+            } else if (isHotelBooked(h.name, h.city)) {
+                drawRoundedBox(75 + nameWidth, y + 10, 60, 22, Color{59, 130, 246, 255});
+                drawText("Booked", 82 + nameWidth, y + 13, 12, WHITE);
+            }
+            
+            string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
+            drawText(info, 65, y + 42, 14, GRAY);
+            
+            if (h.hasDeal) {
+                drawRoundedBox(800, y + 10, 80, 25, DANGER_RED);
+                drawText(to_string((int)h.dealPercent) + "% OFF!", 815, y + 15, 13, WHITE);
+            }
+            
+            drawText(to_string(h.rating).substr(0, 3), 900, y + 40, 18, Color{234, 179, 8, 255});
+            
+            Rectangle cardRect = {40, (float)y, 940, 85};
+            if (CheckCollisionPointRec(GetMousePosition(), cardRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                selectedHotelIndex = savedHotels[i];
+                nights = 1;
+                guests = 2;
+                bookingDay = appDay;
+                bookingMonth = appMonth;
+                bookingYear = appYear;
+                currentScreen = SCREEN_DETAIL;
+            }
+            
+            y += 95;
+        }
+    }
+
 }
 
 void drawExploreScreen() {
