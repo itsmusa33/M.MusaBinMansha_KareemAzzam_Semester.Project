@@ -91,6 +91,12 @@ struct BudgetPlanner {
     float spentInPlan;
     int tripsInPlan;
 };
+// Achievement badges
+struct Achievements {
+    bool frequentTraveler;
+    bool budgetMaster;
+    bool explorer;
+};
 // Notes for planner
 const int MAX_NOTES = 5;
 string plannerNotes[MAX_NOTES];
@@ -124,6 +130,10 @@ int bookingCount = 0;
 Font appFont;
 UserProfile user;
 BudgetPlanner planner;
+
+Achievements badges;
+int destinationsTravelled = 0;
+
 
 Screen currentScreen = SCREEN_SPLASH;
 int selectedHotelIndex = -1;
@@ -341,6 +351,43 @@ float getRemainingPlannerBudget() { //planner function
     return planner.totalBudget - planner.spentInPlan;
 }
 
+void updateUserLevel() {
+    if (user.totalSpent >= 100000) {
+        user.level = 2;  // Gold
+    } else if (user.totalSpent >= 50000) {
+        user.level = 1;  // Silver
+    } else {
+        user.level = 0;  // Bronze
+    }
+}
+
+void updateTravelerScore() {
+    float bookingScore = user.totalBookings * 10.0f;
+    float spendingScore = user.totalSpent / 1000.0f;
+    float visitScore = user.placesVisited * 20.0f;
+    user.travelerScore = bookingScore + spendingScore + visitScore;
+}
+
+void updateAchievements() {
+    // Frequent Traveler: 3+ destinations visited
+    if (destinationsTravelled >= 3) {
+        badges.frequentTraveler = true;
+    }
+
+    // Explorer: 5+ hotels booked
+    if (user.totalBookings >= 5) {
+        badges.explorer = true;
+    }
+
+    // Budget Master: 3+ trips while staying under 70% of planner budget
+    if (planner.enabled && user.totalBookings >= 3) {
+        if (user.totalSpent <= planner.totalBudget * 0.70f) {
+            badges.budgetMaster = true;
+        }
+    }
+}
+
+
 //helper functions for drawing gui elements
 void drawText(string text, int x, int y, int size, Color color){
     DrawTextEx(appFont, text.c_str(), {(float)x, (float)y}, (float)size, 1, color);
@@ -550,6 +597,10 @@ bool createBooking(int hotelIndex, int numNights, int numGuests) {
     user.totalBookings++;
     user.totalSpent += totalCost;
     user.placesVisited++;
+	updateUserLevel();
+    updateTravelerScore();
+    updateAchievements();
+
     //Track in planner
     if (planner.enabled){
         planner.spentInPlan += totalCost;
@@ -795,6 +846,14 @@ void initializeApp() {
     for (int i = 0; i < MAX_NOTES; i++) plannerNotes[i] = "";
     noteCount = 0;
     newNoteInput = "";
+	// No achievements yet
+    badges.frequentTraveler = false;
+    badges.budgetMaster = false;
+    badges.explorer = false;
+    
+    // Reset destinations travelled
+    destinationsTravelled = 0;
+
 
     visitedHotelCount = 0;
     for (int i = 0; i < MAX_VISITED_HOTELS; i++) {
