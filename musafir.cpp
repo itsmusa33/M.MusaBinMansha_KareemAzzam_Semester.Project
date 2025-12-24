@@ -165,6 +165,7 @@ int bookingYear = 2025;
 int appDay = 20;
 int appMonth = 12;
 int appYear = 2025;
+float dateTimer = 0;
 //Edit booking variables
 int editNights = 1;
 int editGuests = 2;
@@ -241,6 +242,33 @@ bool isDateInPast(int day, int month, int year) {
     if (month > appMonth) return false;
     return day < appDay;
 }
+
+bool isHotelVisited(string hotelName, string city) {
+    for (int i = 0; i < visitedHotelCount; i++) {
+        if (visitedHotelNames[i] == hotelName && visitedHotelCities[i] == city) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void markHotelVisited(string hotelName, string city) {
+    if (!isHotelVisited(hotelName, city) && visitedHotelCount < MAX_VISITED_HOTELS) {
+        visitedHotelNames[visitedHotelCount] = hotelName;
+        visitedHotelCities[visitedHotelCount] = city;
+        visitedHotelCount++;
+    }
+}
+
+bool isHotelBooked(string hotelName, string city) {
+    for (int i = 0; i < bookingCount; i++) {
+        if (bookings[i].isActive && bookings[i].hotelName == hotelName && bookings[i].city == city) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 bool hasDateConflict(int startDay, int startMonth, int numNights, int excludeIndex = -1) {
     int endDay = startDay + numNights;
@@ -512,6 +540,20 @@ void updateHotelPrices() {
         
         h.currentPrice = price;
     }
+}
+
+void advanceDay() {
+    appDay++;
+    if (appDay > 30) {
+        appDay = 1;
+        appMonth++;
+        if (appMonth > 12) {
+            appMonth = 1;
+            appYear++;
+        }
+    }
+    initializeWeather();
+    updateHotelPrices();
 }
 
 
@@ -1000,6 +1042,15 @@ void drawLoginScreen(){
 void drawHomeScreen() {
     ClearBackground(LIGHT);
     DrawRectangle(0, 0, 1024, 80, WHITE); //Navbar
+	// Today's date with simulation button
+    string dateStr = "Today: " + formatDate(appDay, appMonth, appYear);
+    drawText(dateStr, 40, 15, 14, GRAY);
+    
+    // Plus button to advance day
+    if (drawSmallButton(200, 10, 25, 25, "+", PAKISTAN_GREEN)) {
+        advanceDay();
+    }
+
     drawText("MUSAFIR", 420, 10, 40, PakGreen); 
 	
 	// User level badge
@@ -1147,6 +1198,17 @@ void drawExploreScreen() {
         drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
         
         drawText(h.name, 65, y + 12, 18, BLACK);
+		
+		// Visited/Booked label
+        int nameWidth = measureText(h.name, 18);
+        if (isHotelVisited(h.name, h.city)) {
+            drawRoundedBox(75 + nameWidth, y + 10, 60, 22, SUCCESS_GREEN);
+            drawText("Visited", 82 + nameWidth, y + 13, 12, WHITE);
+        } else if (isHotelBooked(h.name, h.city)) {
+            drawRoundedBox(75 + nameWidth, y + 10, 60, 22, Color{59, 130, 246, 255});
+            drawText("Booked", 82 + nameWidth, y + 13, 12, WHITE);
+        
+
         string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
         drawText(info, 65, y + 42, 14, GRAY);
         
@@ -1870,9 +1932,42 @@ int main(){
     user.maxBudget = 50000;
     user.budgetMode = true;
     user.preferredCityCount = 0;
-    
+
+	
+	
     while (!WindowShouldClose()) {
+        // Update app date timer
+        dateTimer += GetFrameTime();
+        if (dateTimer >= 120.0f) {  // Every 2 minutes
+            dateTimer = 0;
+            advanceDay();
+        }
+        
+        // Check for completed trips
+        for (int i = 0; i < bookingCount; i++) {
+            if (!bookings[i].isActive) continue;
+
+            int coDay, coMonth, coYear;
+            parseDate(bookings[i].checkOutDate, coDay, coMonth, coYear);
+
+            bool checkoutPassed = (appYear > coYear) ||
+                (appYear == coYear && appMonth > coMonth) ||
+                (appYear == coYear && appMonth == coMonth && appDay >= coDay);
+
+            if (checkoutPassed) {
+                markHotelVisited(bookings[i].hotelName, bookings[i].city);
+                destinationsTravelled++;
+                if (user.placesVisited > 0) {
+                    user.placesVisited--;
+                }
+                bookings[i].isActive = false;
+                updateAchievements();
+                saveGame();
+            }
+        }
+        
         BeginDrawing();
+
         switch (currentScreen) {
             case SCREEN_SPLASH:   drawSplashScreen(); break;
             case SCREEN_LOGIN:    drawLoginScreen(); break;
