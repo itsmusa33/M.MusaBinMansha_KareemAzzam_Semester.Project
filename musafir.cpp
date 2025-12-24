@@ -642,6 +642,10 @@ bool cancelBooking(int index) {
     user.totalBookings--;
     user.placesVisited--;
     bookings[index].isActive = false;
+	updateUserLevel();
+    updateTravelerScore();
+    saveGame();
+
     return true;
 }
 
@@ -721,7 +725,16 @@ void saveGame() {
         file << plannerNotes[i] << "\n";
     }
 
+
+	// Save achievements
+    file << (badges.frequentTraveler ? 1 : 0) << "\n";
+    file << (badges.budgetMaster ? 1 : 0) << "\n";
+    file << (badges.explorer ? 1 : 0) << "\n";
     
+    // Save destinations travelled
+    file << destinationsTravelled << "\n";
+
+	
     file << visitedHotelCount << "\n";
     for (int i = 0; i < visitedHotelCount; i++) {
         file << visitedHotelNames[i] << "\n";
@@ -780,6 +793,18 @@ bool loadGame() {
     for (int i = 0; i < noteCount; i++) {
         getline(file, plannerNotes[i]);
     } 
+
+// Load achievements
+    int ft, bm, ex;
+    file >> ft >> bm >> ex;
+    badges.frequentTraveler = (ft == 1);
+    badges.budgetMaster = (bm == 1);
+    badges.explorer = (ex == 1);
+    
+    // Load destinations travelled
+    file >> destinationsTravelled;
+
+	
     file >> visitedHotelCount;
     file.ignore();
     if (visitedHotelCount < 0) visitedHotelCount = 0;
@@ -974,6 +999,11 @@ void drawHomeScreen() {
     ClearBackground(LIGHT);
     DrawRectangle(0, 0, 1024, 80, WHITE); //Navbar
     drawText("MUSAFIR", 420, 10, 40, PakGreen); 
+	
+	// User level badge
+    drawRoundedBox(870, 15, 130, 30, getLevelColor(user.level));
+    drawText(getLevelName(user.level), 905, 20, 16, WHITE);
+
     //Personalized greeting and budget status
     drawText("Salam, " + user.name + "!", 40, 95, 22, BLACK);
     
@@ -981,6 +1011,30 @@ void drawHomeScreen() {
     string stats = "Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent) + " | Remaining: Rs." + to_string((int)remaining); 
     // Turn the text red if the user is over budget
     drawText(stats, 40, 130, 14, remaining < 0 ? Red : GRAY);
+	// Achievement badges
+    int badgeX = 40;
+    drawText("Badges:", badgeX, 55, 14, GRAY);
+    badgeX += 65;
+
+    if (badges.frequentTraveler) {
+        drawRoundedBox(badgeX, 48, 130, 28, Color{147, 51, 234, 255});
+        drawText("Frequent Traveler", badgeX + 8, 53, 14, WHITE);
+        badgeX += 140;
+    }
+    if (badges.budgetMaster) {
+        drawRoundedBox(badgeX, 48, 115, 28, SUCCESS_GREEN);
+        drawText("Budget Master", badgeX + 8, 53, 14, WHITE);
+        badgeX += 125;
+    }
+    if (badges.explorer) {
+        drawRoundedBox(badgeX, 48, 85, 28, Color{59, 130, 246, 255});
+        drawText("Explorer", badgeX + 10, 53, 14, WHITE);
+        badgeX += 95;
+    }
+    if (!badges.frequentTraveler && !badges.budgetMaster && !badges.explorer) {
+        drawText("none yet", badgeX, 55, 14, GRAY);
+    }
+
 	// Planner info if enabled
     if (planner.enabled) {
         float planRemaining = getRemainingPlannerBudget();
