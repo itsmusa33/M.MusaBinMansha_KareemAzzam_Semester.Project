@@ -173,7 +173,7 @@ int editYear = 2025;
 const int MAX_VISITED_HOTELS = 100;
 string visitedHotelNames[MAX_VISITED_HOTELS];
 string visitedHotelCities[MAX_VISITED_HOTELS];
-int visitedHotelCount = 0
+int visitedHotelCount = 0;
 //helper functions
 float clamp(float value, float minVal, float maxVal) {
     if (value < minVal) return minVal;
@@ -647,7 +647,7 @@ void updateHotelPrices() {
             price *= discount;
         }
         //Keep price in reasonable range
-        h.currentPrice = clamp(price, 500, 200000);
+        h.currentPrice = clamp(price, 500.0, 200000.0);
     }
 }
 void advanceDay() {
@@ -1120,7 +1120,7 @@ void drawHomeScreen() {
         // Trips Planned progress bar
         drawText("Trips Planned:", 500, 155, 14, GRAY);
         DrawRectangle(610, 158, 150, 12, Color{230, 230, 230, 255});
-        float tripProgress = clamp((float)planner.tripsInPlan / (float)planner.plannedTrips, 0, 1);
+        float tripProgress = clamp((float)planner.tripsInPlan / (float)planner.plannedTrips, 0.0f, 1.0f);
         DrawRectangle(610, 158, (int)(150 * tripProgress), 12, Color{0, 102, 51, 255});
         string tripText = to_string(planner.tripsInPlan) + "/" + to_string(planner.plannedTrips);
         drawText(tripText, 770, 155, 14, GRAY);
@@ -1762,7 +1762,7 @@ void drawPlannerScreen() {
         drawText(progressStr, 70, 400, 16, GRAY);
 
         DrawRectangle(70, 430, 400, 16, Color{230, 230, 230, 255});
-        float tripProgress = clamp((float)planner.tripsInPlan / (float)planner.plannedTrips, 0, 1);
+        float tripProgress = clamp((float)planner.tripsInPlan / (float)planner.plannedTrips, 0.0f, 1.0f);
         DrawRectangle(70, 430, (int)(400 * tripProgress), 16, PAK_GREEN);
     }
 
