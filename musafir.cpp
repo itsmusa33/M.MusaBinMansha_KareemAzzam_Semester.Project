@@ -1120,6 +1120,23 @@ void drawHomeScreen() {
 	if (drawButton(700, 180, 140, 50, "Planner", Color{59, 130, 246, 255})){//planner
         currentScreen = SCREEN_PLANNER;
     }
+	// Weather alerts
+    drawText("Weather Alerts:", 40, 250, 16, BLACK);
+    int alertX = 180;
+    for (int i = 0; i < weatherCount; i++) {
+        const Weather& w = weatherData[i];
+        if (w.type != WEATHER_NORMAL) {
+            Color alertColor = (w.type == WEATHER_RAIN) ? Color{59, 130, 246, 255} : Color{234, 179, 8, 255};
+            string alertType = (w.type == WEATHER_RAIN) ? "Rain" : "Festival";
+            string alert = w.city + ": " + alertType;
+
+            drawRoundedBox(alertX, 247, 120, 24, alertColor);
+            drawText(alert, alertX + 8, 252, 12, WHITE);
+            alertX += 130;
+            if (alertX > 920) break;
+        }
+    }
+
     //Settings button at bottom
     if (drawButton(40, 710, 130, 40, "Settings", GRAY)){
         currentScreen = SCREEN_SETTINGS;
@@ -1389,10 +1406,14 @@ void drawDetailScreen(){
     string totalText = "Total: Rs." + to_string((int)total);
     drawText(totalText, 60, 585, 28, WHITE);
     //Budget warning
-    bool exceedsBudget = user.maxBudget > 0 && (user.totalSpent + total) > user.maxBudget;
+    bool exceedsPlan = planner.enabled && (planner.spentInPlan + total > planner.totalBudget);
+	bool exceedsBudget = user.maxBudget > 0 && (user.totalSpent + total) > user.maxBudget;
     if (exceedsBudget){
-        drawRoundedBox(550, 500, 280, 30, Red);
+        drawRoundedBox(550, 500, 280, 30, DANGER_RED);
         drawText("Exceeds Your Budget!", 600, 507, 14, WHITE);
+    } else if (exceedsPlan){
+        drawRoundedBox(550, 500, 280, 30, Color{234, 179, 8, 255});
+        drawText("Exceeds Plan Goal (suggestion)", 565, 507, 12, BLACK);
     }
     //Book button
     if (drawButton(750, 570, 220, 50, "Book Now", Color{34, 197, 94, 255})) {
