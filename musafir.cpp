@@ -91,6 +91,12 @@ struct BudgetPlanner {
     float spentInPlan;
     int tripsInPlan;
 };
+// Achievement badges
+struct Achievements {
+    bool frequentTraveler;
+    bool budgetMaster;
+    bool explorer;
+};
 // Notes for planner
 const int MAX_NOTES = 5;
 string plannerNotes[MAX_NOTES];
@@ -109,8 +115,10 @@ enum Screen {
     SCREEN_SEARCH,
     SCREEN_EDIT_BOOKING,
     SCREEN_SETTINGS,
-	SCREEN_PLANNER
+	SCREEN_PLANNER,
+    SCREEN_SUMMARY
 };
+
 
 // Global arrays
 Hotel hotels[MAX_HOTELS];
@@ -124,6 +132,10 @@ int bookingCount = 0;
 Font appFont;
 UserProfile user;
 BudgetPlanner planner;
+
+Achievements badges;
+int destinationsTravelled = 0;
+
 
 Screen currentScreen = SCREEN_SPLASH;
 int selectedHotelIndex = -1;
@@ -153,6 +165,12 @@ int bookingYear = 2025;
 int appDay = 20;
 int appMonth = 12;
 int appYear = 2025;
+float dateTimer = 0;
+// Saved recommendations (to prevent flickering)
+int savedHotels[3] = {-1, -1, -1};
+int savedHotelCount = 0;
+bool lastWasBudget = true;
+int lastPrefCities = -1;
 //Edit booking variables
 int editNights = 1;
 int editGuests = 2;
@@ -229,6 +247,33 @@ bool isDateInPast(int day, int month, int year) {
     if (month > appMonth) return false;
     return day < appDay;
 }
+
+bool isHotelVisited(string hotelName, string city) {
+    for (int i = 0; i < visitedHotelCount; i++) {
+        if (visitedHotelNames[i] == hotelName && visitedHotelCities[i] == city) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void markHotelVisited(string hotelName, string city) {
+    if (!isHotelVisited(hotelName, city) && visitedHotelCount < MAX_VISITED_HOTELS) {
+        visitedHotelNames[visitedHotelCount] = hotelName;
+        visitedHotelCities[visitedHotelCount] = city;
+        visitedHotelCount++;
+    }
+}
+
+bool isHotelBooked(string hotelName, string city) {
+    for (int i = 0; i < bookingCount; i++) {
+        if (bookings[i].isActive && bookings[i].hotelName == hotelName && bookings[i].city == city) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 bool hasDateConflict(int startDay, int startMonth, int numNights, int excludeIndex = -1) {
     int endDay = startDay + numNights;
@@ -340,6 +385,43 @@ float getRemainingPlannerBudget() { //planner function
     if (!planner.enabled) return 999999;
     return planner.totalBudget - planner.spentInPlan;
 }
+
+void updateUserLevel() {
+    if (user.totalSpent >= 100000) {
+        user.level = 2;  // Gold
+    } else if (user.totalSpent >= 50000) {
+        user.level = 1;  // Silver
+    } else {
+        user.level = 0;  // Bronze
+    }
+}
+
+void updateTravelerScore() {
+    float bookingScore = user.totalBookings * 10.0f;
+    float spendingScore = user.totalSpent / 1000.0f;
+    float visitScore = user.placesVisited * 20.0f;
+    user.travelerScore = bookingScore + spendingScore + visitScore;
+}
+
+void updateAchievements() {
+    // Frequent Traveler: 3+ destinations visited
+    if (destinationsTravelled >= 3) {
+        badges.frequentTraveler = true;
+    }
+
+    // Explorer: 5+ hotels booked
+    if (user.totalBookings >= 5) {
+        badges.explorer = true;
+    }
+
+    // Budget Master: 3+ trips while staying under 70% of planner budget
+    if (planner.enabled && user.totalBookings >= 3) {
+        if (user.totalSpent <= planner.totalBudget * 0.70f) {
+            badges.budgetMaster = true;
+        }
+    }
+}
+
 
 //helper functions for drawing gui elements
 void drawText(string text, int x, int y, int size, Color color){
@@ -465,6 +547,20 @@ void updateHotelPrices() {
     }
 }
 
+void advanceDay() {
+    appDay++;
+    if (appDay > 30) {
+        appDay = 1;
+        appMonth++;
+        if (appMonth > 12) {
+            appMonth = 1;
+            appYear++;
+        }
+    }
+    initializeWeather();
+    updateHotelPrices();
+}
+
 
 void initializeHotels() {
     hotelCount = 0;
@@ -550,6 +646,10 @@ bool createBooking(int hotelIndex, int numNights, int numGuests) {
     user.totalBookings++;
     user.totalSpent += totalCost;
     user.placesVisited++;
+	updateUserLevel();
+    updateTravelerScore();
+    updateAchievements();
+
     //Track in planner
     if (planner.enabled){
         planner.spentInPlan += totalCost;
@@ -591,6 +691,10 @@ bool cancelBooking(int index) {
     user.totalBookings--;
     user.placesVisited--;
     bookings[index].isActive = false;
+	updateUserLevel();
+    updateTravelerScore();
+    saveGame();
+
     return true;
 }
 
@@ -670,7 +774,16 @@ void saveGame() {
         file << plannerNotes[i] << "\n";
     }
 
+
+	// Save achievements
+    file << (badges.frequentTraveler ? 1 : 0) << "\n";
+    file << (badges.budgetMaster ? 1 : 0) << "\n";
+    file << (badges.explorer ? 1 : 0) << "\n";
     
+    // Save destinations travelled
+    file << destinationsTravelled << "\n";
+
+	
     file << visitedHotelCount << "\n";
     for (int i = 0; i < visitedHotelCount; i++) {
         file << visitedHotelNames[i] << "\n";
@@ -729,6 +842,18 @@ bool loadGame() {
     for (int i = 0; i < noteCount; i++) {
         getline(file, plannerNotes[i]);
     } 
+
+// Load achievements
+    int ft, bm, ex;
+    file >> ft >> bm >> ex;
+    badges.frequentTraveler = (ft == 1);
+    badges.budgetMaster = (bm == 1);
+    badges.explorer = (ex == 1);
+    
+    // Load destinations travelled
+    file >> destinationsTravelled;
+
+	
     file >> visitedHotelCount;
     file.ignore();
     if (visitedHotelCount < 0) visitedHotelCount = 0;
@@ -795,6 +920,14 @@ void initializeApp() {
     for (int i = 0; i < MAX_NOTES; i++) plannerNotes[i] = "";
     noteCount = 0;
     newNoteInput = "";
+	// No achievements yet
+    badges.frequentTraveler = false;
+    badges.budgetMaster = false;
+    badges.explorer = false;
+    
+    // Reset destinations travelled
+    destinationsTravelled = 0;
+
 
     visitedHotelCount = 0;
     for (int i = 0; i < MAX_VISITED_HOTELS; i++) {
@@ -914,7 +1047,21 @@ void drawLoginScreen(){
 void drawHomeScreen() {
     ClearBackground(LIGHT);
     DrawRectangle(0, 0, 1024, 80, WHITE); //Navbar
+	// Today's date with simulation button
+    string dateStr = "Today: " + formatDate(appDay, appMonth, appYear);
+    drawText(dateStr, 40, 15, 14, GRAY);
+    
+    // Plus button to advance day
+    if (drawSmallButton(200, 10, 25, 25, "+", PAKISTAN_GREEN)) {
+        advanceDay();
+    }
+
     drawText("MUSAFIR", 420, 10, 40, PakGreen); 
+	
+	// User level badge
+    drawRoundedBox(870, 15, 130, 30, getLevelColor(user.level));
+    drawText(getLevelName(user.level), 905, 20, 16, WHITE);
+
     //Personalized greeting and budget status
     drawText("Salam, " + user.name + "!", 40, 95, 22, BLACK);
     
@@ -922,6 +1069,30 @@ void drawHomeScreen() {
     string stats = "Budget: Rs." + to_string((int)user.maxBudget) + " | Spent: Rs." + to_string((int)user.totalSpent) + " | Remaining: Rs." + to_string((int)remaining); 
     // Turn the text red if the user is over budget
     drawText(stats, 40, 130, 14, remaining < 0 ? Red : GRAY);
+	// Achievement badges
+    int badgeX = 40;
+    drawText("Badges:", badgeX, 55, 14, GRAY);
+    badgeX += 65;
+
+    if (badges.frequentTraveler) {
+        drawRoundedBox(badgeX, 48, 130, 28, Color{147, 51, 234, 255});
+        drawText("Frequent Traveler", badgeX + 8, 53, 14, WHITE);
+        badgeX += 140;
+    }
+    if (badges.budgetMaster) {
+        drawRoundedBox(badgeX, 48, 115, 28, SUCCESS_GREEN);
+        drawText("Budget Master", badgeX + 8, 53, 14, WHITE);
+        badgeX += 125;
+    }
+    if (badges.explorer) {
+        drawRoundedBox(badgeX, 48, 85, 28, Color{59, 130, 246, 255});
+        drawText("Explorer", badgeX + 10, 53, 14, WHITE);
+        badgeX += 95;
+    }
+    if (!badges.frequentTraveler && !badges.budgetMaster && !badges.explorer) {
+        drawText("none yet", badgeX, 55, 14, GRAY);
+    }
+
 	// Planner info if enabled
     if (planner.enabled) {
         float planRemaining = getRemainingPlannerBudget();
@@ -954,31 +1125,103 @@ void drawHomeScreen() {
         currentScreen = SCREEN_SETTINGS;
     }
 
-    // Recommendation List (Shows first 3 active hotels)
-    drawText("Recommended For You", 40, 260, 18, BLACK);
-    int y = 295;
-    int count = 0;
-    for (int i = 0; i < hotelCount && count < 3; i++) {
-        const Hotel& h = hotels[i];
-        if (!h.isActive) continue;
-        
-        drawRoundedBox(40, y, 940, 80, WHITE);
-        drawRoundedBox(40, y, 8, 80, getCityColor(h.city)); //Color strip based on city
-        drawText(h.name, 65, y + 12, 18, BLACK);
-        
-        string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
-        drawText(info, 65, y + 42, 14, GRAY);
-        
-        //Show a red badge if there's a discount
-        if (h.hasDeal) {
-            drawRoundedBox(840, y + 10, 80, 25, Red);
-            drawText(to_string((int)h.dealPercent) + "% OFF!", 855, y + 15, 13, WHITE);
-        }
-        
-        drawText(to_string(h.rating).substr(0, 3), 900, y + 40, 18, Color{234, 179, 8, 255}); // Star rating
-        y += 90;
-        count++;
+	if (drawButton(850, 710, 150, 40, "Summary", PAKISTAN_GREEN)) {
+        currentScreen = SCREEN_SUMMARY;
     }
+
+
+// Recommended hotels
+    drawText("Recommended For You", 40, 290, 18, BLACK);
+
+    // Check if we need to recalculate
+    bool settingsChanged = (lastWasBudget != user.budgetMode) || (lastPrefCities != user.preferredCityCount);
+
+    if (settingsChanged) {
+        lastWasBudget = user.budgetMode;
+        lastPrefCities = user.preferredCityCount;
+        savedHotelCount = 0;
+        savedHotels[0] = savedHotels[1] = savedHotels[2] = -1;
+
+        if (user.preferredCityCount == 1) {
+            // One city selected - show up to 3 hotels from that city
+            for (int i = 0; i < hotelCount && savedHotelCount < 3; i++) {
+                if (hotels[i].isActive && hotels[i].city == user.preferredCities[0]) {
+                    savedHotels[savedHotelCount++] = i;
+                }
+            }
+        } else {
+            // Use preferred cities or default to first 3 cities
+            string cities[3];
+            int cityCount = 0;
+            if (user.preferredCityCount > 1) {
+                for (int i = 0; i < user.preferredCityCount && cityCount < 3; i++) {
+                    cities[cityCount++] = user.preferredCities[i];
+                }
+            } else {
+                cities[0] = CITIES[0]; cities[1] = CITIES[1]; cities[2] = CITIES[2];
+                cityCount = 3;
+            }
+            
+            // Get best hotel from each city
+            for (int c = 0; c < cityCount; c++) {
+                int best = -1;
+                for (int i = 0; i < hotelCount; i++) {
+                    if (!hotels[i].isActive || hotels[i].city != cities[c]) continue;
+                    if (best == -1) best = i;
+                    else if (user.budgetMode && hotels[i].currentPrice < hotels[best].currentPrice) best = i;
+                    else if (!user.budgetMode && hotels[i].currentPrice > hotels[best].currentPrice) best = i;
+                }
+                if (best != -1) savedHotels[savedHotelCount++] = best;
+            }
+        }
+    }
+
+    // Draw saved hotels
+    int y = 325;
+    for (int i = 0; i < savedHotelCount; i++) {
+        if (savedHotels[i] != -1) {
+            const Hotel& h = hotels[savedHotels[i]];
+            
+            drawRoundedBox(40, y, 940, 85, BG_WHITE);
+            drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
+            
+            drawText(h.name, 65, y + 12, 18, BLACK);
+            
+            // Visited/Booked label
+            int nameWidth = measureText(h.name, 18);
+            if (isHotelVisited(h.name, h.city)) {
+                drawRoundedBox(75 + nameWidth, y + 10, 60, 22, SUCCESS_GREEN);
+                drawText("Visited", 82 + nameWidth, y + 13, 12, WHITE);
+            } else if (isHotelBooked(h.name, h.city)) {
+                drawRoundedBox(75 + nameWidth, y + 10, 60, 22, Color{59, 130, 246, 255});
+                drawText("Booked", 82 + nameWidth, y + 13, 12, WHITE);
+            }
+            
+            string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
+            drawText(info, 65, y + 42, 14, GRAY);
+            
+            if (h.hasDeal) {
+                drawRoundedBox(800, y + 10, 80, 25, DANGER_RED);
+                drawText(to_string((int)h.dealPercent) + "% OFF!", 815, y + 15, 13, WHITE);
+            }
+            
+            drawText(to_string(h.rating).substr(0, 3), 900, y + 40, 18, Color{234, 179, 8, 255});
+            
+            Rectangle cardRect = {40, (float)y, 940, 85};
+            if (CheckCollisionPointRec(GetMousePosition(), cardRect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                selectedHotelIndex = savedHotels[i];
+                nights = 1;
+                guests = 2;
+                bookingDay = appDay;
+                bookingMonth = appMonth;
+                bookingYear = appYear;
+                currentScreen = SCREEN_DETAIL;
+            }
+            
+            y += 95;
+        }
+    }
+
 }
 
 void drawExploreScreen() {
@@ -1027,6 +1270,17 @@ void drawExploreScreen() {
         drawRoundedBox(40, y, 8, 85, getCityColor(h.city));
         
         drawText(h.name, 65, y + 12, 18, BLACK);
+		
+		// Visited/Booked label
+        int nameWidth = measureText(h.name, 18);
+        if (isHotelVisited(h.name, h.city)) {
+            drawRoundedBox(75 + nameWidth, y + 10, 60, 22, SUCCESS_GREEN);
+            drawText("Visited", 82 + nameWidth, y + 13, 12, WHITE);
+        } else if (isHotelBooked(h.name, h.city)) {
+            drawRoundedBox(75 + nameWidth, y + 10, 60, 22, Color{59, 130, 246, 255});
+            drawText("Booked", 82 + nameWidth, y + 13, 12, WHITE);
+        
+
         string info = h.city + " | " + h.category + " | Rs." + to_string((int)h.currentPrice) + "/night";
         drawText(info, 65, y + 42, 14, GRAY);
         
@@ -1677,6 +1931,61 @@ void drawSettingsScreen() {
         CloseWindow();
       }
 }
+
+// ==================== SCREEN: SUMMARY ====================
+void drawSummaryScreen() {
+    ClearBackground(BG_LIGHT);
+    DrawRectangle(0, 0, 1024, 60, BG_WHITE);
+    
+    if (drawButton(15, 12, 40, 40, "<", GRAY)) {
+        currentScreen = SCREEN_HOME;
+    }
+    drawText("Session Summary", 420, 18, 24, BLACK);
+
+    // Summary card
+    drawRoundedBox(300, 120, 424, 520, BG_WHITE);
+
+    // Stats
+    drawText("Traveler: " + user.name, 340, 165, 18, BLACK);
+    drawText("Destinations Planned: " + to_string(user.placesVisited), 340, 205, 18, BLACK);
+    drawText("Destinations Travelled: " + to_string(destinationsTravelled), 340, 245, 18, BLACK);
+    drawText("Total Spent: Rs." + to_string((int)user.totalSpent), 340, 285, 18, BLACK);
+
+    // Level with color
+    drawText("Level: " + getLevelName(user.level), 340, 325, 18, getLevelColor(user.level));
+    drawText("Score: " + to_string((int)user.travelerScore), 340, 365, 18, BLACK);
+
+    // Budget info
+    float remaining = user.maxBudget - user.totalSpent;
+    Color remColor = remaining < 0 ? DANGER_RED : SUCCESS_GREEN;
+    drawText("Budget: Rs." + to_string((int)user.maxBudget), 340, 405, 16, GRAY);
+    drawText("Remaining: Rs." + to_string((int)remaining), 340, 430, 16, remColor);
+
+    // Planner info
+    if (planner.enabled) {
+        float planRemaining = getRemainingPlannerBudget();
+        string planStr;
+        if (planRemaining < 0) {
+            planStr = "Planner: Budget Exceeded!";
+        } else {
+            planStr = "Planner: Rs." + to_string((int)planRemaining) + " left";
+        }
+        drawText(planStr, 340, 470, 16, planRemaining < 0 ? DANGER_RED : GRAY);
+    }
+
+    // Achievements
+    string badgesStr = "Badges: ";
+    bool anyBadge = false;
+    if (badges.frequentTraveler) { badgesStr += "Frequent Traveler "; anyBadge = true; }
+    if (badges.budgetMaster) { badgesStr += "Budget Master "; anyBadge = true; }
+    if (badges.explorer) { badgesStr += "Explorer "; anyBadge = true; }
+    if (!anyBadge) badgesStr += "None";
+    drawText(badgesStr, 340, 510, 14, GRAY);
+
+    drawText("Good job exploring Pakistan!", 340, 560, 18, PAKISTAN_GREEN);
+}
+
+
 int main(){
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Musafir - Pakistan Travel App"); //Initialize window
     SetTargetFPS(60);
@@ -1695,9 +2004,42 @@ int main(){
     user.maxBudget = 50000;
     user.budgetMode = true;
     user.preferredCityCount = 0;
-    
+
+	
+	
     while (!WindowShouldClose()) {
+        // Update app date timer
+        dateTimer += GetFrameTime();
+        if (dateTimer >= 120.0f) {  // Every 2 minutes
+            dateTimer = 0;
+            advanceDay();
+        }
+        
+        // Check for completed trips
+        for (int i = 0; i < bookingCount; i++) {
+            if (!bookings[i].isActive) continue;
+
+            int coDay, coMonth, coYear;
+            parseDate(bookings[i].checkOutDate, coDay, coMonth, coYear);
+
+            bool checkoutPassed = (appYear > coYear) ||
+                (appYear == coYear && appMonth > coMonth) ||
+                (appYear == coYear && appMonth == coMonth && appDay >= coDay);
+
+            if (checkoutPassed) {
+                markHotelVisited(bookings[i].hotelName, bookings[i].city);
+                destinationsTravelled++;
+                if (user.placesVisited > 0) {
+                    user.placesVisited--;
+                }
+                bookings[i].isActive = false;
+                updateAchievements();
+                saveGame();
+            }
+        }
+        
         BeginDrawing();
+
         switch (currentScreen) {
             case SCREEN_SPLASH:   drawSplashScreen(); break;
             case SCREEN_LOGIN:    drawLoginScreen(); break;
@@ -1710,6 +2052,7 @@ int main(){
 			case SCREEN_EDIT_BOOKING:drawEditBookingScreen();break;
 			case SCREEN_SETTINGS: drawSettingsScreen(); break;
 			case SCREEN_PLANNER:  drawPlannerScreen(); break;
+			case SCREEN_SUMMARY:  drawSummaryScreen(); break;
             default:drawHomeScreen(); break;
         }
     EndDrawing();
